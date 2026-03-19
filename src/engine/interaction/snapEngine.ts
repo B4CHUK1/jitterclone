@@ -16,6 +16,7 @@ export interface SnapGuide {
   from: number;
   to: number;
   kind: 'edge' | 'center';
+  source: 'object' | 'canvas';
 }
 
 export interface SnapResult {
@@ -24,6 +25,8 @@ export interface SnapResult {
   guides: SnapGuide[];
   snappedX: boolean;
   snappedY: boolean;
+  sourceX: 'object' | 'canvas' | null;
+  sourceY: 'object' | 'canvas' | null;
 }
 
 interface AxisCandidate {
@@ -31,6 +34,7 @@ interface AxisCandidate {
   spanStart: number;
   spanEnd: number;
   kind: 'edge' | 'center';
+  source: 'object' | 'canvas';
 }
 
 interface AxisBest {
@@ -78,16 +82,29 @@ export function offsetBounds(bounds: WorldBounds, dx: number, dy: number): World
 export function resolveBoundsSnapping(
   movingBounds: WorldBounds,
   staticBounds: readonly WorldBounds[],
+  canvasBounds: WorldBounds | null,
   threshold: number,
 ): SnapResult {
-  const xCandidates = staticBounds.flatMap((b) => getAxisCandidates(b, 'x'));
-  const yCandidates = staticBounds.flatMap((b) => getAxisCandidates(b, 'y'));
+  const objectXCandidates = staticBounds.flatMap((b) => getAxisCandidates(b, 'x', 'object'));
+  const objectYCandidates = staticBounds.flatMap((b) => getAxisCandidates(b, 'y', 'object'));
+  const canvasXCandidates = canvasBounds ? getAxisCandidates(canvasBounds, 'x', 'canvas') : [];
+  const canvasYCandidates = canvasBounds ? getAxisCandidates(canvasBounds, 'y', 'canvas') : [];
 
   const movingX = getMovingAxisPoints(movingBounds, 'x');
   const movingY = getMovingAxisPoints(movingBounds, 'y');
 
-  const bestX = findBestAxisSnap(movingX, xCandidates, threshold);
-  const bestY = findBestAxisSnap(movingY, yCandidates, threshold);
+  const bestX = resolveAxisWithPriority(
+    movingX,
+    objectXCandidates,
+    canvasXCandidates,
+    threshold,
+  );
+  const bestY = resolveAxisWithPriority(
+    movingY,
+    objectYCandidates,
+    canvasYCandidates,
+    threshold,
+  );
 
   const guides: SnapGuide[] = [];
   if (bestX) {
@@ -97,6 +114,7 @@ export function resolveBoundsSnapping(
       from: Math.min(bestX.movingSpanStart, bestX.target.spanStart),
       to: Math.max(bestX.movingSpanEnd, bestX.target.spanEnd),
       kind: bestX.target.kind,
+      source: bestX.target.source,
     });
   }
   if (bestY) {
@@ -106,6 +124,7 @@ export function resolveBoundsSnapping(
       from: Math.min(bestY.movingSpanStart, bestY.target.spanStart),
       to: Math.max(bestY.movingSpanEnd, bestY.target.spanEnd),
       kind: bestY.target.kind,
+      source: bestY.target.source,
     });
   }
 
@@ -115,10 +134,27 @@ export function resolveBoundsSnapping(
     guides,
     snappedX: Boolean(bestX),
     snappedY: Boolean(bestY),
+    sourceX: bestX?.target.source ?? null,
+    sourceY: bestY?.target.source ?? null,
   };
 }
 
-function getAxisCandidates(bounds: WorldBounds, axis: 'x' | 'y'): AxisCandidate[] {
+export function getCanvasBounds(width: number, height: number): WorldBounds {
+  return {
+    left: 0,
+    top: 0,
+    right: width,
+    bottom: height,
+    centerX: width / 2,
+    centerY: height / 2,
+  };
+}
+
+function getAxisCandidates(
+  bounds: WorldBounds,
+  axis: 'x' | 'y',
+  source: 'object' | 'canvas',
+): AxisCandidate[] {
   if (axis === 'x') {
     return [
       {
@@ -126,18 +162,21 @@ function getAxisCandidates(bounds: WorldBounds, axis: 'x' | 'y'): AxisCandidate[
         spanStart: bounds.top,
         spanEnd: bounds.bottom,
         kind: 'edge',
+        source,
       },
       {
         value: bounds.centerX,
         spanStart: bounds.top,
         spanEnd: bounds.bottom,
         kind: 'center',
+        source,
       },
       {
         value: bounds.right,
         spanStart: bounds.top,
         spanEnd: bounds.bottom,
         kind: 'edge',
+        source,
       },
     ];
   }
@@ -148,18 +187,21 @@ function getAxisCandidates(bounds: WorldBounds, axis: 'x' | 'y'): AxisCandidate[
       spanStart: bounds.left,
       spanEnd: bounds.right,
       kind: 'edge',
+      source,
     },
     {
       value: bounds.centerY,
       spanStart: bounds.left,
       spanEnd: bounds.right,
       kind: 'center',
+      source,
     },
     {
       value: bounds.bottom,
       spanStart: bounds.left,
       spanEnd: bounds.right,
       kind: 'edge',
+      source,
     },
   ];
 }
@@ -206,4 +248,23 @@ function findBestAxisSnap(
   }
 
   return best;
+}
+
+function resolveAxisWithPriority(
+  movingPoints: Array<{ value: number; spanStart: number; spanEnd: number }>,
+  objectTargets: readonly AxisCandidate[],
+  canvasTargets: readonly AxisCandidate[],
+  threshold: number,
+): AxisBest | null {
+  const bestObject = findBestAxisSnap(movingPoints, objectTargets, threshold);
+  const bestCanvas = findBestAxisSnap(movingPoints, canvasTargets, threshold);
+  if (!bestObject) return bestCanvas;
+  if (!bestCanvas) return bestObject;
+
+  const distanceDelta = bestObject.distance - bestCanvas.distance;
+  const SNAP_STABILITY_EPS = 0.5;
+  if (Math.abs(distanceDelta) <= SNAP_STABILITY_EPS) {
+    return bestObject;
+  }
+  return distanceDelta < 0 ? bestObject : bestCanvas;
 }
