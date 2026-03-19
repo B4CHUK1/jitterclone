@@ -41,6 +41,11 @@ const useSceneStore = create(immer((set) => ({
       })
     }
   }),
+
+  updateFit: (id, fit) => set((state) => {
+    const el = state.elements.find(e => e.id === id)
+    if (el) el.fit = fit
+  }),
 })))
 
 export default useSceneStore

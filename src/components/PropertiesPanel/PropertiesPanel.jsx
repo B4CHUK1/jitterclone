@@ -2,6 +2,8 @@
 import useSceneStore from '../../store/sceneStore'
 import useEditorStore from '../../store/editorStore'
 
+const FIT_MODES = ['contain', 'cover', 'crop']
+
 const labelStyle = {
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '10px',
@@ -51,6 +53,7 @@ function PropertiesPanel() {
   const selectedId = useEditorStore((s) => s.selectedId)
   const elements = useSceneStore((s) => s.elements)
   const updateProperty = useSceneStore((s) => s.updateProperty)
+  const updateFit = useSceneStore((s) => s.updateFit)
 
   const element = selectedId ? elements.find((e) => e.id === selectedId) : null
 
@@ -74,7 +77,7 @@ function PropertiesPanel() {
     )
   }
 
-  const { properties, id } = element
+  const { properties, id, fit = 'contain' } = element
   const set = (prop, value) => updateProperty(id, prop, value)
 
   const opacityPercent = Math.round(properties.opacity.value * 100)
@@ -116,6 +119,36 @@ function PropertiesPanel() {
             onChange={(e) => set('opacity', parseInt(e.target.value, 10) / 100)}
             className="prop-slider"
           />
+        </div>
+
+        {/* Fit mode */}
+        <div style={{ marginBottom: '12px' }}>
+          <span style={labelStyle}>Fit</span>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {FIT_MODES.map((mode) => {
+              const active = fit === mode
+              return (
+                <button
+                  key={mode}
+                  onClick={() => updateFit(id, mode)}
+                  style={{
+                    flex: 1,
+                    height: '24px',
+                    background: active ? '#e8ff00' : '#1e1e1e',
+                    color: active ? '#000000' : '#888888',
+                    border: `1px solid ${active ? '#e8ff00' : '#2a2a2a'}`,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '10px',
+                    cursor: 'pointer',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  {mode}
+                </button>
+              )
+            })}
+          </div>
         </div>
 
         {/* Rotation */}

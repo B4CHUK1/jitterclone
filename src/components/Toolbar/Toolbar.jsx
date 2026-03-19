@@ -28,9 +28,19 @@ function Toolbar() {
         const naturalWidth = img.naturalWidth
         const naturalHeight = img.naturalHeight
 
-        // Scale to half natural size, but cap to canvas dimensions
-        const width = Math.min(naturalWidth / 2, CANVAS_W)
-        const height = Math.min(naturalHeight / 2, CANVAS_H)
+        // Fit within 60% of canvas, preserving aspect ratio
+        const MAX_W = CANVAS_W * 0.6
+        const MAX_H = CANVAS_H * 0.6
+        const ratio = naturalWidth / naturalHeight
+
+        let width, height
+        if (naturalWidth / MAX_W > naturalHeight / MAX_H) {
+          width  = Math.min(naturalWidth, MAX_W)
+          height = width / ratio
+        } else {
+          height = Math.min(naturalHeight, MAX_H)
+          width  = height * ratio
+        }
 
         // Center on canvas
         const x = (CANVAS_W - width) / 2
@@ -44,6 +54,7 @@ function Toolbar() {
           src,
           naturalWidth,
           naturalHeight,
+          fit: 'contain',
           properties: {
             x:        { value: x,      keyframes: [] },
             y:        { value: y,      keyframes: [] },

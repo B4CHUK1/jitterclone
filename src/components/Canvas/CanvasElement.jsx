@@ -6,7 +6,6 @@ import useEditorStore from '../../store/editorStore'
 
 const HANDLE_SIZE = 8
 
-// Handle descriptors: position in % on the element boundary
 const HANDLES = [
   { id: 'nw', top: 0,   left: 0,   cursor: 'nw-resize' },
   { id: 'n',  top: 0,   left: 50,  cursor: 'n-resize'  },
@@ -18,7 +17,6 @@ const HANDLES = [
   { id: 'w',  top: 50,  left: 0,   cursor: 'w-resize'  },
 ]
 
-// Compute new geometry from drag delta for a given handle
 function applyHandleDelta(handleId, initial, dx, dy) {
   let { x, y, width, height } = initial
   const MIN = 20
@@ -65,13 +63,11 @@ function applyHandleDelta(handleId, initial, dx, dy) {
   return { x, y, width, height }
 }
 
-// Resize handle — module-level component so hooks are stable
+// Module-level component — stable hooks, one per handle instance
 function ResizeHandle({ handleId, cursor, posTop, posLeft, elementRef, currentState, totalZoom, elementId, updateProperties, buildTransform }) {
   const initial = useRef(null)
 
-  const bindHandle = useDrag(({ first, movement: [mx, my], last, event }) => {
-    event.stopPropagation()
-
+  const bindHandle = useDrag(({ first, movement: [mx, my], last }) => {
     if (first) {
       initial.current = { ...currentState.current }
     }
@@ -95,9 +91,16 @@ function ResizeHandle({ handleId, cursor, posTop, posLeft, elementRef, currentSt
     }
   }, { filterTaps: true })
 
+  // Merge gesture handler with stopPropagation so the element's drag doesn't also start
+  const gestureHandlers = bindHandle()
+
   return (
     <div
-      {...bindHandle()}
+      {...gestureHandlers}
+      onPointerDown={(e) => {
+        e.stopPropagation()
+        gestureHandlers.onPointerDown?.(e)
+      }}
       style={{
         position: 'absolute',
         top: `${posTop}%`,
@@ -121,7 +124,7 @@ function CanvasElement({ element, isSelected, totalZoom }) {
   const updateProperties = useSceneStore((s) => s.updateProperties)
   const select = useEditorStore((s) => s.select)
 
-  const { id, src, properties } = element
+  const { id, src, naturalWidth, naturalHeight, fit = 'contain', properties } = element
   const x        = properties.x.value
   const y        = properties.y.value
   const width    = properties.width.value
@@ -130,7 +133,7 @@ function CanvasElement({ element, isSelected, totalZoom }) {
   const rotation = properties.rotation.value
   const scale    = properties.scale.value
 
-  // Always-current snapshot used by handles to capture initial state on drag start
+  // Always-current snapshot — handles capture this on drag start
   const currentState = useRef({ x, y, width, height, rotation, scale })
   currentState.current = { x, y, width, height, rotation, scale }
 
@@ -140,6 +143,9 @@ function CanvasElement({ element, isSelected, totalZoom }) {
     return `translate(${px}px, ${py}px) rotate(${rot}deg) scale(${sc})`
   }, [])
 
+  // DO NOT override onPointerDown after spreading bind() — that breaks the gesture.
+  // The canvas background uses e.target === e.currentTarget for deselect, so no
+  // explicit stopPropagation is needed here.
   const bind = useDrag(
     ({ first, movement: [mx, my], last, event }) => {
       event.stopPropagation()
@@ -149,7 +155,6 @@ function CanvasElement({ element, isSelected, totalZoom }) {
         select(id)
       }
 
-      // Divide by totalZoom to convert screen-space pixels → canvas-space pixels
       const inv = 1 / totalZoom
       const newX = dragStart.current.x + mx * inv
       const newY = dragStart.current.y + my * inv
@@ -165,11 +170,20 @@ function CanvasElement({ element, isSelected, totalZoom }) {
     { filterTaps: true },
   )
 
+  // Image rendering based on fit mode
+  const imgStyle = {
+    display: 'block',
+    pointerEvents: 'none',
+    objectPosition: 'center',
+    ...(fit === 'crop'
+      ? { width: `${naturalWidth}px`, height: `${naturalHeight}px`, objectFit: 'none' }
+      : { width: '100%', height: '100%', objectFit: fit }),
+  }
+
   return (
     <div
       ref={ref}
       {...bind()}
-      onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => {
         e.stopPropagation()
         select(id)
@@ -188,18 +202,22 @@ function CanvasElement({ element, isSelected, totalZoom }) {
         touchAction: 'none',
       }}
     >
-      <img
-        src={src}
-        alt=""
+      {/* Inner wrapper handles overflow:hidden for crop mode */}
+      <div
         style={{
           width: '100%',
           height: '100%',
-          display: 'block',
-          pointerEvents: 'none',
-          objectFit: 'fill',
+          overflow: fit === 'crop' ? 'hidden' : 'visible',
+          position: 'relative',
         }}
-        draggable={false}
-      />
+      >
+        <img
+          src={src}
+          alt=""
+          style={imgStyle}
+          draggable={false}
+        />
+      </div>
 
       {isSelected && HANDLES.map((h) => (
         <ResizeHandle

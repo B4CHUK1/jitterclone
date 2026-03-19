@@ -64,12 +64,33 @@ function Canvas() {
     }
   }, [])
 
-  // Wheel zoom — must be non-passive to call preventDefault
+  // Wheel: non-passive so we can call preventDefault.
+  // ctrlKey === true signals pinch-to-zoom (trackpad) or Ctrl+wheel → ZOOM.
+  // No ctrlKey = two-finger scroll on trackpad → PAN.
   const handleWheel = useCallback((e) => {
     e.preventDefault()
-    const factor = e.deltaY > 0 ? 0.9 : 1.1
-    setZoom(useEditorStore.getState().zoom * factor)
-  }, [setZoom])
+
+    const { zoom: curZoom, panX: curPanX, panY: curPanY } = useEditorStore.getState()
+
+    if (e.ctrlKey) {
+      // ZOOM — centered on mouse cursor position
+      const factor = e.deltaY > 0 ? 0.92 : 1.08
+      const newZoom = Math.min(Math.max(curZoom * factor, 0.1), 4)
+
+      const rect = containerRef.current.getBoundingClientRect()
+      const mouseX = e.clientX - rect.left - rect.width  / 2
+      const mouseY = e.clientY - rect.top  - rect.height / 2
+      const scaleFactor = newZoom / curZoom
+      const newPanX = mouseX - scaleFactor * (mouseX - curPanX)
+      const newPanY = mouseY - scaleFactor * (mouseY - curPanY)
+
+      setZoom(newZoom)
+      setPan(newPanX, newPanY)
+    } else {
+      // PAN — two-finger trackpad scroll
+      setPan(curPanX - e.deltaX, curPanY - e.deltaY)
+    }
+  }, [setZoom, setPan])
 
   useEffect(() => {
     const el = containerRef.current
