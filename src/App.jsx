@@ -1,6 +1,7 @@
-// src/components/App.jsx
+// src/App.jsx
 import Toolbar from './components/Toolbar/Toolbar'
 import Canvas from './components/Canvas/Canvas'
+import PropertiesPanel from './components/PropertiesPanel/PropertiesPanel'
 
 function App() {
   return (
@@ -14,7 +15,10 @@ function App() {
       }}
     >
       <Toolbar />
-      <Canvas />
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <Canvas />
+        <PropertiesPanel />
+      </div>
     </div>
   )
 }

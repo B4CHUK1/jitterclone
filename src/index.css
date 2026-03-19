@@ -30,3 +30,49 @@ body {
 button {
   font-family: inherit;
 }
+
+/* Properties panel — number inputs */
+input.prop-number {
+  background: #1e1e1e;
+  border: 1px solid #2a2a2a;
+  color: #ffffff;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 3px 6px;
+  width: 100%;
+  -moz-appearance: textfield;
+  outline: none;
+}
+input.prop-number::-webkit-outer-spin-button,
+input.prop-number::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+input.prop-number:focus {
+  border-color: #e8ff00;
+}
+
+/* Properties panel — range sliders */
+input.prop-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 2px;
+  background: #2a2a2a;
+  outline: none;
+  cursor: pointer;
+}
+input.prop-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  background: #e8ff00;
+  cursor: pointer;
+}
+input.prop-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  background: #e8ff00;
+  border: none;
+  cursor: pointer;
+}
