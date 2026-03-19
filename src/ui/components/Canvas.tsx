@@ -3,9 +3,17 @@ import { PixiRenderer } from '@/engine/renderer';
 import { buildSceneGraph, findRenderNode } from '@/engine/scene';
 import { hitTestPoint, hitTestRect } from '@/engine/interaction/hitTest';
 import { beginDrag, updateDrag } from '@/engine/interaction/dragInteraction';
-import { beginResize, updateResize } from '@/engine/interaction/resizeInteraction';
+import {
+  beginResize,
+  updateResize,
+  type ResizeModifiers,
+} from '@/engine/interaction/resizeInteraction';
 import { beginRotate, updateRotate } from '@/engine/interaction/rotateInteraction';
-import { beginMarquee, updateMarquee, getMarqueeRect } from '@/engine/interaction/marqueeInteraction';
+import {
+  beginMarquee,
+  updateMarquee,
+  getMarqueeRect,
+} from '@/engine/interaction/marqueeInteraction';
 import type { DragState } from '@/engine/interaction/dragInteraction';
 import type { ResizeState } from '@/engine/interaction/resizeInteraction';
 import type { RotateState } from '@/engine/interaction/rotateInteraction';
@@ -13,28 +21,52 @@ import type { MarqueeState } from '@/engine/interaction/marqueeInteraction';
 import type { ResizeHandle } from '@/state/editorStore';
 import type { RenderNode } from '@/engine/scene';
 import type { Vec2 } from '@/engine/transform';
+import { getWorldCorners } from '@/engine/transform';
 import { useDocumentStore, useEditorStore, useViewportStore } from '@/state';
 import { SelectionOverlay } from '@/ui/overlays/SelectionOverlay';
 import styles from './Canvas.module.css';
+
+// ── Drag threshold to distinguish click from drag ──
+const DRAG_THRESHOLD = 3; // pixels
+
+// ── Interaction state machine ──
+type InteractionPhase =
+  | 'idle'
+  | 'pending-drag'     // pointerdown on element, waiting for threshold
+  | 'pending-marquee'  // pointerdown on empty, waiting for threshold
+  | 'dragging'
+  | 'resizing'
+  | 'rotating'
+  | 'marquee'
+  | 'panning';
 
 export function Canvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<PixiRenderer | null>(null);
 
-  // Interaction state refs (not React state, to avoid re-renders during drag)
+  // ── Interaction state (refs to avoid re-renders during gestures) ──
+  const phaseRef = useRef<InteractionPhase>('idle');
+  const pointerIdRef = useRef<number | null>(null);
+  const startClientRef = useRef<Vec2>({ x: 0, y: 0 });
   const dragStateRef = useRef<DragState | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
   const rotateStateRef = useRef<RotateState | null>(null);
   const marqueeStateRef = useRef<MarqueeState | null>(null);
-  const isPanningRef = useRef(false);
   const lastPanPointRef = useRef<Vec2>({ x: 0, y: 0 });
+  // Store the hit node id for pending-drag (so we can select + drag after threshold)
+  const pendingHitIdRef = useRef<string | null>(null);
+  const pendingShiftRef = useRef(false);
+
+  // ── Cursor state ──
+  const [interactionCursor, setInteractionCursor] = useState<string | null>(null);
+  const [hoverCursor, setHoverCursor] = useState<string>('default');
 
   // Force re-render for overlay updates
   const [, setRenderTick] = useState(0);
   const tick = useCallback(() => setRenderTick((t) => t + 1), []);
 
-  const document = useDocumentStore((s) => s.document);
+  const doc = useDocumentStore((s) => s.document);
   const updateTransform = useDocumentStore((s) => s.updateTransform);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const select = useEditorStore((s) => s.select);
@@ -53,6 +85,44 @@ export function Canvas() {
   const screenToWorld = useViewportStore((s) => s.screenToWorld);
   const worldToScreen = useViewportStore((s) => s.worldToScreen);
 
+  // ── Helpers ──
+  const getScene = useCallback(() => buildSceneGraph(doc), [doc]);
+
+  const clientToScreen = useCallback(
+    (clientX: number, clientY: number): Vec2 => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      return rect
+        ? { x: clientX - rect.left, y: clientY - rect.top }
+        : { x: clientX, y: clientY };
+    },
+    [],
+  );
+
+  /** Clean up all interaction state and release pointer capture */
+  const resetInteraction = useCallback(
+    (pointerId?: number) => {
+      phaseRef.current = 'idle';
+      dragStateRef.current = null;
+      resizeStateRef.current = null;
+      rotateStateRef.current = null;
+      marqueeStateRef.current = null;
+      pendingHitIdRef.current = null;
+      setInteractionCursor(null);
+      setMarqueeScreenRect(null);
+
+      if (pointerId != null && pointerIdRef.current === pointerId) {
+        try {
+          containerRef.current?.releasePointerCapture(pointerId);
+        } catch {
+          // already released
+        }
+      }
+      pointerIdRef.current = null;
+      tick();
+    },
+    [tick],
+  );
+
   // ── Init renderer ──
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -63,16 +133,18 @@ export function Canvas() {
     rendererRef.current = renderer;
 
     const rect = container.getBoundingClientRect();
-    renderer.init({
-      canvas,
-      width: rect.width,
-      height: rect.height,
-      backgroundColor: 0x0d0d12,
-    }).then(() => {
-      setContainerSize(rect.width, rect.height);
-      resetView(document.width, document.height);
-      tick();
-    });
+    renderer
+      .init({
+        canvas,
+        width: rect.width,
+        height: rect.height,
+        backgroundColor: 0x0d0d12,
+      })
+      .then(() => {
+        setContainerSize(rect.width, rect.height);
+        resetView(doc.width, doc.height);
+        tick();
+      });
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -89,7 +161,7 @@ export function Canvas() {
       renderer.destroy();
       rendererRef.current = null;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Render loop ──
@@ -98,31 +170,18 @@ export function Canvas() {
     if (!renderer?.ready) return;
 
     renderer.setViewportTransform(panX, panY, zoom);
-    renderer.renderDocBackground(document.width, document.height);
+    renderer.renderDocBackground(doc.width, doc.height);
 
-    const sceneRoots = buildSceneGraph(document);
+    const sceneRoots = buildSceneGraph(doc);
     renderer.render(sceneRoots);
-  }, [document, panX, panY, zoom]);
+  }, [doc, panX, panY, zoom]);
 
-  // ── Build scene for interactions ──
-  const getScene = useCallback(() => buildSceneGraph(document), [document]);
-
-  const getContainerOffset = useCallback((): Vec2 => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    return rect ? { x: rect.left, y: rect.top } : { x: 0, y: 0 };
-  }, []);
-
-  const clientToScreen = useCallback(
-    (clientX: number, clientY: number): Vec2 => {
-      const offset = getContainerOffset();
-      return { x: clientX - offset.x, y: clientY - offset.y };
-    },
-    [getContainerOffset],
-  );
-
-  // ── Marquee screen rect for overlay ──
+  // ── Marquee rect for overlay ──
   const [marqueeScreenRect, setMarqueeScreenRect] = useState<{
-    x: number; y: number; width: number; height: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
   } | null>(null);
 
   // ── Wheel handler ──
@@ -133,13 +192,9 @@ export function Canvas() {
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       const screen = clientToScreen(e.clientX, e.clientY);
-
       if (e.ctrlKey || e.metaKey) {
-        // Zoom
-        const delta = -e.deltaY * 0.003;
-        zoomAtPoint(delta, screen);
+        zoomAtPoint(-e.deltaY * 0.003, screen);
       } else {
-        // Pan
         pan(-e.deltaX, -e.deltaY);
       }
       tick();
@@ -149,14 +204,54 @@ export function Canvas() {
     return () => container.removeEventListener('wheel', handleWheel);
   }, [clientToScreen, zoomAtPoint, pan, tick]);
 
-  // ── Pointer handlers ──
+  // ── Hover cursor: determine cursor from what's under the pointer ──
+  const updateHoverCursor = useCallback(
+    (clientX: number, clientY: number) => {
+      if (phaseRef.current !== 'idle') return;
+
+      const screen = clientToScreen(clientX, clientY);
+
+      // Check if hovering over a handle of the selected element
+      if (selectedIds.size > 0) {
+        const scene = getScene();
+        for (const id of selectedIds) {
+          const rn = findRenderNode(scene, id);
+          if (!rn) continue;
+
+          const corners = getWorldCorners(rn.node.transform, rn.worldMatrix);
+          const screenCorners = corners.map(worldToScreen) as [Vec2, Vec2, Vec2, Vec2];
+
+          const handleHit = hitTestScreenHandles(screenCorners, screen);
+          if (handleHit) {
+            setHoverCursor(handleHit.cursor);
+            return;
+          }
+        }
+      }
+
+      // Check if hovering over an element body
+      const world = screenToWorld(screen);
+      const scene = getScene();
+      const hit = hitTestPoint(scene, world);
+      if (hit) {
+        setHoverCursor(selectedIds.has(hit.node.id) ? 'move' : 'default');
+      } else {
+        setHoverCursor('default');
+      }
+    },
+    [clientToScreen, selectedIds, getScene, worldToScreen, screenToWorld],
+  );
+
+  // ── POINTER DOWN on canvas ──
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
+      // Middle button or Alt+click = pan
       if (e.button === 1 || (e.button === 0 && (activeTool === 'hand' || e.altKey))) {
-        // Pan
-        isPanningRef.current = true;
+        phaseRef.current = 'panning';
+        pointerIdRef.current = e.pointerId;
         lastPanPointRef.current = { x: e.clientX, y: e.clientY };
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        containerRef.current?.setPointerCapture(e.pointerId);
+        setInteractionCursor('grabbing');
         return;
       }
 
@@ -167,43 +262,41 @@ export function Canvas() {
       const scene = getScene();
       const hit = hitTestPoint(scene, world);
 
+      startClientRef.current = { x: e.clientX, y: e.clientY };
+      pointerIdRef.current = e.pointerId;
+      containerRef.current?.setPointerCapture(e.pointerId);
+
       if (hit) {
-        // Hit an element
-        if (e.shiftKey) {
-          toggleSelect(hit.node.id);
-        } else if (!selectedIds.has(hit.node.id)) {
-          select(hit.node.id);
-        }
-
-        // Start drag
-        const currentSelectedIds = e.shiftKey
-          ? new Set([...selectedIds, hit.node.id])
-          : selectedIds.has(hit.node.id)
-            ? selectedIds
-            : new Set([hit.node.id]);
-
-        dragStateRef.current = beginDrag(world, currentSelectedIds, (id) => {
-          return document.nodes[id]?.transform;
-        });
-
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        // Clicked on an element — enter pending-drag (wait for threshold)
+        pendingHitIdRef.current = hit.node.id;
+        pendingShiftRef.current = e.shiftKey;
+        phaseRef.current = 'pending-drag';
       } else {
-        // Miss — start marquee or deselect
+        // Clicked empty space — enter pending-marquee
         if (!e.shiftKey) {
           deselectAll();
         }
-        marqueeStateRef.current = beginMarquee(world);
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        pendingShiftRef.current = e.shiftKey;
+        phaseRef.current = 'pending-marquee';
       }
 
       tick();
     },
-    [activeTool, clientToScreen, screenToWorld, getScene, selectedIds, select, toggleSelect, deselectAll, document.nodes, tick],
+    [activeTool, clientToScreen, screenToWorld, getScene, deselectAll, tick],
   );
 
+  // ── POINTER MOVE ──
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
-      if (isPanningRef.current) {
+      const phase = phaseRef.current;
+
+      // Always update hover cursor when idle
+      if (phase === 'idle') {
+        updateHoverCursor(e.clientX, e.clientY);
+        return;
+      }
+
+      if (phase === 'panning') {
         const dx = e.clientX - lastPanPointRef.current.x;
         const dy = e.clientY - lastPanPointRef.current.y;
         pan(dx, dy);
@@ -215,7 +308,44 @@ export function Canvas() {
       const screen = clientToScreen(e.clientX, e.clientY);
       const world = screenToWorld(screen);
 
-      if (dragStateRef.current) {
+      // ── Pending states: check drag threshold ──
+      if (phase === 'pending-drag' || phase === 'pending-marquee') {
+        const dx = e.clientX - startClientRef.current.x;
+        const dy = e.clientY - startClientRef.current.y;
+        if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
+
+        if (phase === 'pending-drag') {
+          // Threshold crossed → commit selection and start drag
+          const hitId = pendingHitIdRef.current;
+          if (hitId) {
+            if (pendingShiftRef.current) {
+              toggleSelect(hitId);
+            } else if (!selectedIds.has(hitId)) {
+              select(hitId);
+            }
+
+            const currentSelected = pendingShiftRef.current
+              ? new Set([...selectedIds, hitId])
+              : selectedIds.has(hitId)
+                ? selectedIds
+                : new Set([hitId]);
+
+            const startWorld = screenToWorld(clientToScreen(startClientRef.current.x, startClientRef.current.y));
+            dragStateRef.current = beginDrag(startWorld, currentSelected, (id) => doc.nodes[id]?.transform);
+            phaseRef.current = 'dragging';
+            setInteractionCursor('grabbing');
+          }
+        } else {
+          // Threshold crossed → start marquee
+          const startWorld = screenToWorld(clientToScreen(startClientRef.current.x, startClientRef.current.y));
+          marqueeStateRef.current = beginMarquee(startWorld);
+          phaseRef.current = 'marquee';
+          setInteractionCursor('crosshair');
+        }
+      }
+
+      // ── Active interactions ──
+      if (phaseRef.current === 'dragging' && dragStateRef.current) {
         const updates = updateDrag(dragStateRef.current, world);
         for (const [id, pos] of updates) {
           updateTransform(id, pos);
@@ -224,27 +354,30 @@ export function Canvas() {
         return;
       }
 
-      if (resizeStateRef.current) {
-        const updates = updateResize(resizeStateRef.current, world, e.shiftKey);
+      if (phaseRef.current === 'resizing' && resizeStateRef.current) {
+        const mods: ResizeModifiers = { shift: e.shiftKey, alt: e.altKey };
+        const updates = updateResize(resizeStateRef.current, world, mods);
         updateTransform(resizeStateRef.current.nodeId, updates);
         tick();
         return;
       }
 
-      if (rotateStateRef.current) {
+      if (phaseRef.current === 'rotating' && rotateStateRef.current) {
         const updates = updateRotate(rotateStateRef.current, world, e.shiftKey);
         updateTransform(rotateStateRef.current.nodeId, updates);
         tick();
         return;
       }
 
-      if (marqueeStateRef.current) {
+      if (phaseRef.current === 'marquee' && marqueeStateRef.current) {
         marqueeStateRef.current = updateMarquee(marqueeStateRef.current, world);
         const rect = getMarqueeRect(marqueeStateRef.current);
 
-        // Convert to screen for display
         const screenMin = worldToScreen({ x: rect.x, y: rect.y });
-        const screenMax = worldToScreen({ x: rect.x + rect.width, y: rect.y + rect.height });
+        const screenMax = worldToScreen({
+          x: rect.x + rect.width,
+          y: rect.y + rect.height,
+        });
         setMarqueeScreenRect({
           x: Math.min(screenMin.x, screenMax.x),
           y: Math.min(screenMin.y, screenMax.y),
@@ -252,7 +385,6 @@ export function Canvas() {
           height: Math.abs(screenMax.y - screenMin.y),
         });
 
-        // Live selection
         const scene = getScene();
         const hits = hitTestRect(scene, rect);
         selectMultiple(hits.map((h) => h.node.id));
@@ -260,36 +392,94 @@ export function Canvas() {
         return;
       }
     },
-    [clientToScreen, screenToWorld, worldToScreen, pan, updateTransform, getScene, selectMultiple, tick],
+    [
+      updateHoverCursor,
+      pan,
+      clientToScreen,
+      screenToWorld,
+      worldToScreen,
+      selectedIds,
+      select,
+      toggleSelect,
+      doc.nodes,
+      updateTransform,
+      getScene,
+      selectMultiple,
+      tick,
+    ],
   );
 
+  // ── POINTER UP ──
   const handlePointerUp = useCallback(
-    (_e: React.PointerEvent) => {
-      isPanningRef.current = false;
-      dragStateRef.current = null;
-      resizeStateRef.current = null;
-      rotateStateRef.current = null;
-      marqueeStateRef.current = null;
-      setMarqueeScreenRect(null);
-      tick();
+    (e: React.PointerEvent) => {
+      const phase = phaseRef.current;
+
+      // If still in pending-drag (threshold not crossed) → treat as click
+      if (phase === 'pending-drag') {
+        const hitId = pendingHitIdRef.current;
+        if (hitId) {
+          if (pendingShiftRef.current) {
+            toggleSelect(hitId);
+          } else {
+            select(hitId);
+          }
+        }
+      }
+
+      // If still in pending-marquee (threshold not crossed) → already deselected
+      // Nothing more to do.
+
+      resetInteraction(e.pointerId);
     },
-    [tick],
+    [select, toggleSelect, resetInteraction],
   );
 
-  // ── Handle pointer down on selection handles ──
+  // ── Pointer cancel / lost capture — safety cleanup ──
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const cleanup = () => {
+      if (phaseRef.current !== 'idle') {
+        resetInteraction(pointerIdRef.current ?? undefined);
+      }
+    };
+
+    container.addEventListener('pointercancel', cleanup);
+    container.addEventListener('lostpointercapture', cleanup);
+    // Also handle pointer up outside window
+    window.addEventListener('pointerup', cleanup);
+    window.addEventListener('blur', cleanup);
+
+    return () => {
+      container.removeEventListener('pointercancel', cleanup);
+      container.removeEventListener('lostpointercapture', cleanup);
+      window.removeEventListener('pointerup', cleanup);
+      window.removeEventListener('blur', cleanup);
+    };
+  }, [resetInteraction]);
+
+  // ── Handle pointer down on selection handles (from overlay) ──
   const handleHandlePointerDown = useCallback(
     (e: React.PointerEvent, handle: string) => {
       e.stopPropagation();
+      e.preventDefault();
+
       const screen = clientToScreen(e.clientX, e.clientY);
       const world = screenToWorld(screen);
 
       const nodeId = [...selectedIds][0];
       if (!nodeId) return;
-      const node = document.nodes[nodeId];
+      const node = doc.nodes[nodeId];
       if (!node) return;
+
+      pointerIdRef.current = e.pointerId;
+      containerRef.current?.setPointerCapture(e.pointerId);
 
       if (handle.startsWith('rotate-')) {
         rotateStateRef.current = beginRotate(world, nodeId, node.transform);
+        phaseRef.current = 'rotating';
+        setInteractionCursor('grabbing');
       } else {
         resizeStateRef.current = beginResize(
           handle as ResizeHandle,
@@ -297,12 +487,12 @@ export function Canvas() {
           nodeId,
           node.transform,
         );
+        phaseRef.current = 'resizing';
+        // Set cursor matching the handle direction
+        setInteractionCursor(getResizeCursor(handle));
       }
-
-      // Capture on the container for move/up events
-      containerRef.current?.setPointerCapture(e.pointerId);
     },
-    [clientToScreen, screenToWorld, selectedIds, document.nodes],
+    [clientToScreen, screenToWorld, selectedIds, doc.nodes],
   );
 
   // ── Selected render nodes for overlay ──
@@ -316,8 +506,15 @@ export function Canvas() {
     return nodes;
   })();
 
+  // ── Compute effective cursor ──
+  const effectiveCursor = interactionCursor ?? hoverCursor;
+
   return (
-    <div ref={containerRef} className={styles.canvasContainer}>
+    <div
+      ref={containerRef}
+      className={styles.canvasContainer}
+      style={{ cursor: effectiveCursor }}
+    >
       <canvas
         ref={canvasRef}
         className={styles.canvas}
@@ -330,7 +527,109 @@ export function Canvas() {
         worldToScreen={worldToScreen}
         onHandlePointerDown={handleHandlePointerDown}
         marqueeScreen={marqueeScreenRect}
+        interactionCursor={interactionCursor}
       />
     </div>
   );
+}
+
+// ── Cursor helpers ──
+
+function getResizeCursor(handle: string): string {
+  switch (handle) {
+    case 'top':
+    case 'bottom':
+      return 'ns-resize';
+    case 'left':
+    case 'right':
+      return 'ew-resize';
+    case 'top-left':
+    case 'bottom-right':
+      return 'nwse-resize';
+    case 'top-right':
+    case 'bottom-left':
+      return 'nesw-resize';
+    default:
+      return 'default';
+  }
+}
+
+/**
+ * Lightweight screen-space handle hit testing for hover cursor.
+ * Tests corners, edges, and rotation zones.
+ */
+function hitTestScreenHandles(
+  screenCorners: [Vec2, Vec2, Vec2, Vec2],
+  screenPoint: Vec2,
+): { cursor: string } | null {
+  const [tl, tr, br, bl] = screenCorners;
+  const CORNER_RADIUS = 12;
+  const EDGE_DIST = 8;
+  const ROT_OFFSET = 22;
+  const ROT_RADIUS = 14;
+
+  const center = {
+    x: (tl.x + tr.x + br.x + bl.x) / 4,
+    y: (tl.y + tr.y + br.y + bl.y) / 4,
+  };
+
+  // Check rotation zones first (outside corners)
+  const rotCorners = [tl, tr, br, bl].map((c) => {
+    const dx = c.x - center.x;
+    const dy = c.y - center.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len === 0) return c;
+    const factor = (len + ROT_OFFSET) / len;
+    return { x: center.x + dx * factor, y: center.y + dy * factor };
+  });
+
+  for (const rc of rotCorners) {
+    if (dist(screenPoint, rc) <= ROT_RADIUS) {
+      return { cursor: 'grab' };
+    }
+  }
+
+  // Corner handles
+  const corners = [
+    { pos: tl, cursor: 'nwse-resize' },
+    { pos: tr, cursor: 'nesw-resize' },
+    { pos: br, cursor: 'nwse-resize' },
+    { pos: bl, cursor: 'nesw-resize' },
+  ];
+  for (const c of corners) {
+    if (dist(screenPoint, c.pos) <= CORNER_RADIUS) {
+      return { cursor: c.cursor };
+    }
+  }
+
+  // Edge proximity
+  const edges = [
+    { a: tl, b: tr, cursor: 'ns-resize' },
+    { a: tr, b: br, cursor: 'ew-resize' },
+    { a: br, b: bl, cursor: 'ns-resize' },
+    { a: bl, b: tl, cursor: 'ew-resize' },
+  ];
+  for (const edge of edges) {
+    if (distToSegment(screenPoint, edge.a, edge.b) <= EDGE_DIST) {
+      return { cursor: edge.cursor };
+    }
+  }
+
+  return null;
+}
+
+function dist(a: Vec2, b: Vec2): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return dist(p, a);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
 }

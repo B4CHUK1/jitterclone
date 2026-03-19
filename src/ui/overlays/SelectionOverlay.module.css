@@ -8,32 +8,48 @@
   z-index: var(--z-overlay);
 }
 
-.handle {
+/* Corner resize handles — visible squares */
+.cornerHandle {
   position: absolute;
-  width: var(--handle-size);
-  height: var(--handle-size);
+  width: 8px;
+  height: 8px;
   background: var(--color-handle-fill);
   border: 1.5px solid var(--color-handle-stroke);
   border-radius: 1px;
   pointer-events: auto;
   transform: translate(-50%, -50%);
+  z-index: 3;
 }
 
-.edgeHandle {
+.cornerHandle:hover {
+  background: var(--color-selection);
+  border-color: var(--color-selection);
+}
+
+/* Edge hit areas — invisible but wide strips along each edge */
+.edgeHit {
   position: absolute;
   pointer-events: auto;
+  z-index: 2;
+  /* Debug: uncomment to visualize edge hit areas */
+  /* background: rgba(255, 0, 0, 0.15); */
 }
 
-.rotationHandle {
+/* Rotation handle zones — invisible circles outside corners */
+.rotationHit {
   position: absolute;
-  width: 14px;
-  height: 14px;
+  width: 20px;
+  height: 20px;
   pointer-events: auto;
   transform: translate(-50%, -50%);
   cursor: grab;
   border-radius: 50%;
+  z-index: 1;
+  /* Debug: uncomment to visualize rotation hit areas */
+  /* background: rgba(0, 255, 0, 0.15); */
 }
 
+/* Marquee selection rectangle */
 .marquee {
   position: absolute;
   border: 1px solid var(--color-marquee-stroke);

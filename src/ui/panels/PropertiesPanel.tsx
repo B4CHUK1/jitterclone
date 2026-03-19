@@ -1,4 +1,5 @@
 import { useEditorStore, useDocumentStore } from '@/state';
+import { NumericInput } from '@/ui/components/NumericInput';
 import styles from './PropertiesPanel.module.css';
 
 export function PropertiesPanel() {
@@ -36,13 +37,6 @@ export function PropertiesPanel() {
   const t = node.transform;
   const s = node.style;
 
-  const setT = (key: string, value: string) => {
-    const num = parseFloat(value);
-    if (!isNaN(num)) {
-      updateTransform(nodeId, { [key]: num });
-    }
-  };
-
   return (
     <div className={styles.panel}>
       {/* Transform */}
@@ -51,41 +45,41 @@ export function PropertiesPanel() {
         <div className={styles.row}>
           <div className={styles.field}>
             <span className={styles.fieldLabel}>X</span>
-            <input
+            <NumericInput
               className={styles.fieldInput}
-              type="number"
-              value={Math.round(t.x)}
-              onChange={(e) => setT('x', e.target.value)}
+              label="X position"
+              value={t.x}
+              onChange={(v) => updateTransform(nodeId, { x: v })}
             />
           </div>
           <div className={styles.field}>
             <span className={styles.fieldLabel}>Y</span>
-            <input
+            <NumericInput
               className={styles.fieldInput}
-              type="number"
-              value={Math.round(t.y)}
-              onChange={(e) => setT('y', e.target.value)}
+              label="Y position"
+              value={t.y}
+              onChange={(v) => updateTransform(nodeId, { y: v })}
             />
           </div>
         </div>
         <div className={styles.row}>
           <div className={styles.field}>
             <span className={styles.fieldLabel}>W</span>
-            <input
+            <NumericInput
               className={styles.fieldInput}
-              type="number"
-              value={Math.round(t.width)}
-              onChange={(e) => setT('width', e.target.value)}
+              label="Width"
+              value={t.width}
+              onChange={(v) => updateTransform(nodeId, { width: v })}
               min={1}
             />
           </div>
           <div className={styles.field}>
             <span className={styles.fieldLabel}>H</span>
-            <input
+            <NumericInput
               className={styles.fieldInput}
-              type="number"
-              value={Math.round(t.height)}
-              onChange={(e) => setT('height', e.target.value)}
+              label="Height"
+              value={t.height}
+              onChange={(v) => updateTransform(nodeId, { height: v })}
               min={1}
             />
           </div>
@@ -93,11 +87,12 @@ export function PropertiesPanel() {
         <div className={styles.row}>
           <div className={styles.field}>
             <span className={styles.fieldLabel}>Rotation</span>
-            <input
+            <NumericInput
               className={styles.fieldInput}
-              type="number"
-              value={Math.round(t.rotation * 10) / 10}
-              onChange={(e) => setT('rotation', e.target.value)}
+              label="Rotation"
+              value={t.rotation}
+              onChange={(v) => updateTransform(nodeId, { rotation: v })}
+              precision={1}
             />
           </div>
         </div>
@@ -111,13 +106,17 @@ export function PropertiesPanel() {
             className={styles.colorSwatch}
             type="color"
             value={s.fill.color}
-            onChange={(e) => updateStyle(nodeId, { fill: { ...s.fill, color: e.target.value } })}
+            onChange={(e) =>
+              updateStyle(nodeId, { fill: { ...s.fill, color: e.target.value } })
+            }
           />
           <input
             className={styles.colorInput}
             type="text"
             value={s.fill.color}
-            onChange={(e) => updateStyle(nodeId, { fill: { ...s.fill, color: e.target.value } })}
+            onChange={(e) =>
+              updateStyle(nodeId, { fill: { ...s.fill, color: e.target.value } })
+            }
           />
         </div>
       </div>
@@ -126,14 +125,11 @@ export function PropertiesPanel() {
         <div className={styles.sectionTitle}>Opacity</div>
         <div className={styles.row}>
           <div className={styles.field}>
-            <input
+            <NumericInput
               className={styles.fieldInput}
-              type="number"
-              value={Math.round(s.opacity * 100)}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                if (!isNaN(v)) updateStyle(nodeId, { opacity: Math.max(0, Math.min(100, v)) / 100 });
-              }}
+              label="Opacity"
+              value={s.opacity * 100}
+              onChange={(v) => updateStyle(nodeId, { opacity: v / 100 })}
               min={0}
               max={100}
             />
