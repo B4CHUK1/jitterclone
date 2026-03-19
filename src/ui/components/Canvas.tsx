@@ -23,12 +23,21 @@ import type { RenderNode } from '@/engine/scene';
 import type { Vec2 } from '@/engine/transform';
 import { getWorldCorners } from '@/engine/transform';
 import { getResizeCursorFromDirection } from '@/engine/interaction/resizeCursor';
+import {
+  getRenderNodeBounds,
+  offsetBounds,
+  resolveBoundsSnapping,
+  type SnapGuide,
+  type WorldBounds,
+} from '@/engine/interaction/snapEngine';
 import { useDocumentStore, useEditorStore, useViewportStore } from '@/state';
 import { SelectionOverlay } from '@/ui/overlays/SelectionOverlay';
+import { SnapOverlay } from '@/ui/overlays/SnapOverlay';
 import styles from './Canvas.module.css';
 
 // ── Drag threshold to distinguish click from drag ──
 const DRAG_THRESHOLD = 3; // pixels
+const SNAP_THRESHOLD_SCREEN_PX = 8;
 
 // ── Interaction state machine ──
 type InteractionPhase =
@@ -58,10 +67,18 @@ export function Canvas() {
   // Store the hit node id for pending-drag (so we can select + drag after threshold)
   const pendingHitIdRef = useRef<string | null>(null);
   const pendingShiftRef = useRef(false);
+  const dragStartBoundsRef = useRef<WorldBounds | null>(null);
+  const resizeStaticBoundsRef = useRef<WorldBounds[]>([]);
 
   // ── Cursor state ──
   const [interactionCursor, setInteractionCursor] = useState<string | null>(null);
   const [hoverCursor, setHoverCursor] = useState<string>('default');
+  const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
+  const [rotateTooltip, setRotateTooltip] = useState<{
+    screen: Vec2;
+    angle: number;
+    snapped: boolean;
+  } | null>(null);
 
   // Force re-render for overlay updates
   const [, setRenderTick] = useState(0);
@@ -110,6 +127,10 @@ export function Canvas() {
       pendingHitIdRef.current = null;
       setInteractionCursor(null);
       setMarqueeScreenRect(null);
+      setSnapGuides([]);
+      setRotateTooltip(null);
+      dragStartBoundsRef.current = null;
+      resizeStaticBoundsRef.current = [];
 
       if (pointerId != null && pointerIdRef.current === pointerId) {
         try {
@@ -333,6 +354,14 @@ export function Canvas() {
 
             const startWorld = screenToWorld(clientToScreen(startClientRef.current.x, startClientRef.current.y));
             dragStateRef.current = beginDrag(startWorld, currentSelected, (id) => doc.nodes[id]?.transform);
+            const currentScene = getScene();
+            const selectedBounds = [...currentSelected]
+              .map((id) => {
+                const rn = findRenderNode(currentScene, id);
+                return rn ? getRenderNodeBounds(rn) : null;
+              })
+              .filter((bounds): bounds is WorldBounds => bounds !== null);
+            dragStartBoundsRef.current = selectedBounds.length > 0 ? mergeBounds(selectedBounds) : null;
             phaseRef.current = 'dragging';
             setInteractionCursor('grabbing');
           }
@@ -348,9 +377,31 @@ export function Canvas() {
       // ── Active interactions ──
       if (phaseRef.current === 'dragging' && dragStateRef.current) {
         const updates = updateDrag(dragStateRef.current, world);
+        const threshold = SNAP_THRESHOLD_SCREEN_PX / zoom;
+        const scene = getScene();
+        const staticBounds = getStaticBounds(scene, selectedIds);
+        const firstUpdate = updates.values().next().value as { x: number; y: number } | undefined;
+
+        if (dragStartBoundsRef.current && firstUpdate && dragStateRef.current.startTransforms.size > 0) {
+          const firstStart = dragStateRef.current.startTransforms.values().next().value;
+          if (firstStart) {
+            const proposedDx = firstUpdate.x - firstStart.x;
+            const proposedDy = firstUpdate.y - firstStart.y;
+            const movingBounds = offsetBounds(dragStartBoundsRef.current, proposedDx, proposedDy);
+            const snap = resolveBoundsSnapping(movingBounds, staticBounds, threshold);
+            for (const [id, pos] of updates) {
+              updateTransform(id, { x: pos.x + snap.dx, y: pos.y + snap.dy });
+            }
+            setSnapGuides(snap.guides);
+            tick();
+            return;
+          }
+        }
+
         for (const [id, pos] of updates) {
           updateTransform(id, pos);
         }
+        setSnapGuides([]);
         tick();
         return;
       }
@@ -358,7 +409,9 @@ export function Canvas() {
       if (phaseRef.current === 'resizing' && resizeStateRef.current) {
         const mods: ResizeModifiers = { shift: e.shiftKey, alt: e.altKey };
         const updates = updateResize(resizeStateRef.current, world, mods);
-        updateTransform(resizeStateRef.current.nodeId, updates);
+        const snapped = applyResizeSnap(updates, resizeStaticBoundsRef.current, SNAP_THRESHOLD_SCREEN_PX / zoom);
+        updateTransform(resizeStateRef.current.nodeId, snapped.transform);
+        setSnapGuides(snapped.guides);
         tick();
         return;
       }
@@ -366,6 +419,11 @@ export function Canvas() {
       if (phaseRef.current === 'rotating' && rotateStateRef.current) {
         const updates = updateRotate(rotateStateRef.current, world, e.shiftKey);
         updateTransform(rotateStateRef.current.nodeId, updates);
+        setRotateTooltip({
+          screen,
+          angle: updates.rotation,
+          snapped: e.shiftKey,
+        });
         tick();
         return;
       }
@@ -404,6 +462,7 @@ export function Canvas() {
       toggleSelect,
       doc.nodes,
       updateTransform,
+      zoom,
       getScene,
       selectMultiple,
       tick,
@@ -485,6 +544,11 @@ export function Canvas() {
         );
         phaseRef.current = 'rotating';
         setInteractionCursor('grabbing');
+        setRotateTooltip({
+          screen,
+          angle: node.transform.rotation,
+          snapped: false,
+        });
       } else {
         const handleCursor = renderNode
           ? getResizeCursorForHandle(
@@ -504,6 +568,8 @@ export function Canvas() {
           node.transform,
         );
         phaseRef.current = 'resizing';
+        const staticBounds = getStaticBounds(scene, new Set([nodeId]));
+        resizeStaticBoundsRef.current = staticBounds;
         // Set cursor matching the handle direction
         setInteractionCursor(handleCursor);
       }
@@ -544,8 +610,81 @@ export function Canvas() {
         onHandlePointerDown={handleHandlePointerDown}
         marqueeScreen={marqueeScreenRect}
       />
+      <SnapOverlay
+        guides={snapGuides}
+        worldToScreen={worldToScreen}
+        rotateTooltip={rotateTooltip}
+      />
     </div>
   );
+}
+
+function getStaticBounds(scene: RenderNode[], excludedIds: ReadonlySet<string>): WorldBounds[] {
+  const stack = [...scene];
+  const bounds: WorldBounds[] = [];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+    stack.push(...node.children);
+    if (excludedIds.has(node.node.id)) continue;
+    bounds.push(getRenderNodeBounds(node));
+  }
+  return bounds;
+}
+
+function mergeBounds(boundsList: WorldBounds[]): WorldBounds {
+  const left = Math.min(...boundsList.map((b) => b.left));
+  const right = Math.max(...boundsList.map((b) => b.right));
+  const top = Math.min(...boundsList.map((b) => b.top));
+  const bottom = Math.max(...boundsList.map((b) => b.bottom));
+  return {
+    left,
+    right,
+    top,
+    bottom,
+    centerX: (left + right) / 2,
+    centerY: (top + bottom) / 2,
+  };
+}
+
+function applyResizeSnap(
+  updates: Partial<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>,
+  staticBounds: readonly WorldBounds[],
+  threshold: number,
+): { transform: typeof updates; guides: SnapGuide[] } {
+  if (
+    updates.x == null
+    || updates.y == null
+    || updates.width == null
+    || updates.height == null
+    || updates.width <= 0
+    || updates.height <= 0
+  ) {
+    return { transform: updates, guides: [] };
+  }
+
+  const movingBounds: WorldBounds = {
+    left: updates.x,
+    right: updates.x + updates.width,
+    top: updates.y,
+    bottom: updates.y + updates.height,
+    centerX: updates.x + updates.width / 2,
+    centerY: updates.y + updates.height / 2,
+  };
+  const snap = resolveBoundsSnapping(movingBounds, staticBounds, threshold);
+  return {
+    transform: {
+      ...updates,
+      x: updates.x + snap.dx,
+      y: updates.y + snap.dy,
+    },
+    guides: snap.guides,
+  };
 }
 
 // ── Cursor helpers ──
