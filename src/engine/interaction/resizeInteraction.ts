@@ -46,25 +46,16 @@ export function updateResize(
 ): Partial<Transform> {
   const { handle, startWorldPoint, startTransform: st } = state;
   const { shift: preserveAspect, alt: fromCenter } = modifiers;
+  const MIN_SIZE = 1;
 
-  // Rotate world delta into element's local axis
+  // Convert pointer delta to element local axes (start frame)
   const angle = degToRad(-st.rotation);
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   const rawDx = currentWorldPoint.x - startWorldPoint.x;
   const rawDy = currentWorldPoint.y - startWorldPoint.y;
-  const dx = rawDx * cos - rawDy * sin;
-  const dy = rawDx * sin + rawDy * cos;
-
-  let newX = st.x;
-  let newY = st.y;
-  let newW = st.width;
-  let newH = st.height;
-
-  const MIN_SIZE = 1;
-  const rotAngle = degToRad(st.rotation);
-  const cosR = Math.cos(rotAngle);
-  const sinR = Math.sin(rotAngle);
+  const localDx = rawDx * cos - rawDy * sin;
+  const localDy = rawDx * sin + rawDy * cos;
 
   // Determine which axes are affected by the handle
   const affectsLeft = handle === 'left' || handle === 'top-left' || handle === 'bottom-left';
@@ -72,64 +63,172 @@ export function updateResize(
   const affectsTop = handle === 'top' || handle === 'top-left' || handle === 'top-right';
   const affectsBottom = handle === 'bottom' || handle === 'bottom-left' || handle === 'bottom-right';
 
-  // Compute width change
-  if (affectsRight) {
-    newW = Math.max(MIN_SIZE, st.width + dx);
-  } else if (affectsLeft) {
-    const dw = Math.min(dx, st.width - MIN_SIZE);
-    newW = st.width - dw;
-    if (!fromCenter) {
-      newX = st.x + dw * cosR;
-      newY = st.y + dw * sinR;
+  // Local sides in the element start frame.
+  let left = 0;
+  let right = st.width;
+  let top = 0;
+  let bottom = st.height;
+
+  // Move active sides in local space.
+  if (fromCenter) {
+    if (affectsLeft || affectsRight) {
+      left -= localDx;
+      right += localDx;
+    }
+    if (affectsTop || affectsBottom) {
+      top -= localDy;
+      bottom += localDy;
+    }
+  } else {
+    if (affectsLeft) left += localDx;
+    if (affectsRight) right += localDx;
+    if (affectsTop) top += localDy;
+    if (affectsBottom) bottom += localDy;
+  }
+
+  // Clamp min size while keeping the intended fixed side stable.
+  if (right - left < MIN_SIZE) {
+    if (fromCenter) {
+      const cx = (left + right) / 2;
+      left = cx - MIN_SIZE / 2;
+      right = cx + MIN_SIZE / 2;
+    } else if (affectsLeft && !affectsRight) {
+      left = right - MIN_SIZE;
+    } else {
+      right = left + MIN_SIZE;
+    }
+  }
+  if (bottom - top < MIN_SIZE) {
+    if (fromCenter) {
+      const cy = (top + bottom) / 2;
+      top = cy - MIN_SIZE / 2;
+      bottom = cy + MIN_SIZE / 2;
+    } else if (affectsTop && !affectsBottom) {
+      top = bottom - MIN_SIZE;
+    } else {
+      bottom = top + MIN_SIZE;
     }
   }
 
-  // Compute height change
-  if (affectsBottom) {
-    newH = Math.max(MIN_SIZE, st.height + dy);
-  } else if (affectsTop) {
-    const dh = Math.min(dy, st.height - MIN_SIZE);
-    newH = st.height - dh;
-    if (!fromCenter) {
-      newX = (affectsLeft ? newX : st.x) - dh * sinR;
-      newY = (affectsLeft ? newY : st.y) + dh * cosR;
-    }
-  }
-
-  // Preserve aspect ratio (Shift)
+  // Preserve aspect ratio (Shift).
   if (preserveAspect && st.width > 0 && st.height > 0) {
     const ratio = st.width / st.height;
     const isCorner = (affectsLeft || affectsRight) && (affectsTop || affectsBottom);
-    const isHorizontalEdge = affectsLeft || affectsRight;
+    const isHorizontalEdge = (affectsLeft || affectsRight) && !(affectsTop || affectsBottom);
+    const isVerticalEdge = (affectsTop || affectsBottom) && !(affectsLeft || affectsRight);
 
     if (isCorner) {
-      if (newW / newH > ratio) {
-        newH = newW / ratio;
+      const width = right - left;
+      const height = bottom - top;
+      if (width / height > ratio) {
+        const targetHeight = Math.max(MIN_SIZE, width / ratio);
+        if (fromCenter) {
+          const cy = (top + bottom) / 2;
+          top = cy - targetHeight / 2;
+          bottom = cy + targetHeight / 2;
+        } else if (affectsTop && !affectsBottom) {
+          top = bottom - targetHeight;
+        } else {
+          bottom = top + targetHeight;
+        }
       } else {
-        newW = newH * ratio;
+        const targetWidth = Math.max(MIN_SIZE, height * ratio);
+        if (fromCenter) {
+          const cx = (left + right) / 2;
+          left = cx - targetWidth / 2;
+          right = cx + targetWidth / 2;
+        } else if (affectsLeft && !affectsRight) {
+          left = right - targetWidth;
+        } else {
+          right = left + targetWidth;
+        }
       }
     } else if (isHorizontalEdge) {
-      newH = newW / ratio;
-    } else {
-      newW = newH * ratio;
+      const targetHeight = Math.max(MIN_SIZE, (right - left) / ratio);
+      const cy = st.height / 2;
+      top = cy - targetHeight / 2;
+      bottom = cy + targetHeight / 2;
+    } else if (isVerticalEdge) {
+      const targetWidth = Math.max(MIN_SIZE, (bottom - top) * ratio);
+      const cx = st.width / 2;
+      left = cx - targetWidth / 2;
+      right = cx + targetWidth / 2;
     }
   }
 
-  // Alt: resize from center — mirror the delta on both sides
-  if (fromCenter) {
-    const dw = newW - st.width;
-    const dh = newH - st.height;
-    newW = st.width + dw * 2;
-    newH = st.height + dh * 2;
-    newW = Math.max(MIN_SIZE, newW);
-    newH = Math.max(MIN_SIZE, newH);
+  const newW = Math.max(MIN_SIZE, right - left);
+  const newH = Math.max(MIN_SIZE, bottom - top);
 
-    // Shift position so center stays fixed
-    const halfDw = (newW - st.width) / 2;
-    const halfDh = (newH - st.height) / 2;
-    newX = st.x - halfDw * cosR + halfDh * sinR;
-    newY = st.y - halfDw * sinR - halfDh * cosR;
-  }
+  const fixedLocalStart = getFixedLocalPoint(handle, st.width, st.height, fromCenter);
+  const fixedLocalNew = getFixedLocalPoint(handle, newW, newH, fromCenter);
+  const fixedWorld = localToWorldNoParent(st, fixedLocalStart);
+
+  const { x: newX, y: newY } = solvePositionForFixedWorld(st, newW, newH, fixedLocalNew, fixedWorld);
 
   return { x: newX, y: newY, width: newW, height: newH };
+}
+
+function getFixedLocalPoint(
+  handle: ResizeHandle,
+  width: number,
+  height: number,
+  fromCenter: boolean,
+): Vec2 {
+  if (fromCenter) return { x: width / 2, y: height / 2 };
+  switch (handle) {
+    case 'top-left':
+      return { x: width, y: height };
+    case 'top':
+      return { x: width / 2, y: height };
+    case 'top-right':
+      return { x: 0, y: height };
+    case 'right':
+      return { x: 0, y: height / 2 };
+    case 'bottom-right':
+      return { x: 0, y: 0 };
+    case 'bottom':
+      return { x: width / 2, y: 0 };
+    case 'bottom-left':
+      return { x: width, y: 0 };
+    case 'left':
+      return { x: width, y: height / 2 };
+  }
+}
+
+function localToWorldNoParent(t: Transform, local: Vec2): Vec2 {
+  const angle = degToRad(t.rotation);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const ax = t.anchorX * t.width;
+  const ay = t.anchorY * t.height;
+
+  const rx = (local.x - ax) * t.scaleX;
+  const ry = (local.y - ay) * t.scaleY;
+
+  return {
+    x: t.x + ax + rx * cos - ry * sin,
+    y: t.y + ay + rx * sin + ry * cos,
+  };
+}
+
+function solvePositionForFixedWorld(
+  st: Transform,
+  newW: number,
+  newH: number,
+  fixedLocalNew: Vec2,
+  fixedWorld: Vec2,
+): Vec2 {
+  const angle = degToRad(st.rotation);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const ax = st.anchorX * newW;
+  const ay = st.anchorY * newH;
+
+  const rx = (fixedLocalNew.x - ax) * st.scaleX;
+  const ry = (fixedLocalNew.y - ay) * st.scaleY;
+
+  return {
+    x: fixedWorld.x - ax - (rx * cos - ry * sin),
+    y: fixedWorld.y - ay - (rx * sin + ry * cos),
+  };
 }

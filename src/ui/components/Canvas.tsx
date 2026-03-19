@@ -22,6 +22,7 @@ import type { ResizeHandle } from '@/state/editorStore';
 import type { RenderNode } from '@/engine/scene';
 import type { Vec2 } from '@/engine/transform';
 import { getWorldCorners } from '@/engine/transform';
+import { getResizeCursorFromDirection } from '@/engine/interaction/resizeCursor';
 import { useDocumentStore, useEditorStore, useViewportStore } from '@/state';
 import { SelectionOverlay } from '@/ui/overlays/SelectionOverlay';
 import styles from './Canvas.module.css';
@@ -485,6 +486,17 @@ export function Canvas() {
         phaseRef.current = 'rotating';
         setInteractionCursor('grabbing');
       } else {
+        const handleCursor = renderNode
+          ? getResizeCursorForHandle(
+              handle,
+              getWorldCorners(renderNode.node.transform, renderNode.worldMatrix).map(worldToScreen) as [
+                Vec2,
+                Vec2,
+                Vec2,
+                Vec2,
+              ],
+            )
+          : getResizeCursor(handle);
         resizeStateRef.current = beginResize(
           handle as ResizeHandle,
           world,
@@ -493,10 +505,10 @@ export function Canvas() {
         );
         phaseRef.current = 'resizing';
         // Set cursor matching the handle direction
-        setInteractionCursor(getResizeCursor(handle));
+        setInteractionCursor(handleCursor);
       }
     },
-    [clientToScreen, screenToWorld, selectedIds, doc.nodes, getScene],
+    [clientToScreen, screenToWorld, selectedIds, doc.nodes, getScene, worldToScreen],
   );
 
   // ── Selected render nodes for overlay ──
@@ -557,6 +569,30 @@ function getResizeCursor(handle: string): string {
   }
 }
 
+function getResizeCursorForHandle(
+  handle: string,
+  screenCorners: [Vec2, Vec2, Vec2, Vec2],
+): string {
+  const [tl, tr, br, bl] = screenCorners;
+  const center = {
+    x: (tl.x + tr.x + br.x + bl.x) / 4,
+    y: (tl.y + tr.y + br.y + bl.y) / 4,
+  };
+  const pointByHandle: Record<string, Vec2> = {
+    top: midpoint(tl, tr),
+    right: midpoint(tr, br),
+    bottom: midpoint(br, bl),
+    left: midpoint(bl, tl),
+    'top-left': tl,
+    'top-right': tr,
+    'bottom-right': br,
+    'bottom-left': bl,
+  };
+  const p = pointByHandle[handle];
+  if (!p) return getResizeCursor(handle);
+  return getResizeCursorFromDirection({ x: p.x - center.x, y: p.y - center.y });
+}
+
 /**
  * Lightweight screen-space handle hit testing for hover cursor.
  * Tests corners, edges, and rotation zones.
@@ -594,10 +630,10 @@ function hitTestScreenHandles(
 
   // Corner handles
   const corners = [
-    { pos: tl, cursor: 'nwse-resize' },
-    { pos: tr, cursor: 'nesw-resize' },
-    { pos: br, cursor: 'nwse-resize' },
-    { pos: bl, cursor: 'nesw-resize' },
+    { pos: tl, cursor: getResizeCursorFromDirection({ x: tl.x - center.x, y: tl.y - center.y }) },
+    { pos: tr, cursor: getResizeCursorFromDirection({ x: tr.x - center.x, y: tr.y - center.y }) },
+    { pos: br, cursor: getResizeCursorFromDirection({ x: br.x - center.x, y: br.y - center.y }) },
+    { pos: bl, cursor: getResizeCursorFromDirection({ x: bl.x - center.x, y: bl.y - center.y }) },
   ];
   for (const c of corners) {
     if (dist(screenPoint, c.pos) <= CORNER_RADIUS) {
@@ -607,10 +643,38 @@ function hitTestScreenHandles(
 
   // Edge proximity
   const edges = [
-    { a: tl, b: tr, cursor: 'ns-resize' },
-    { a: tr, b: br, cursor: 'ew-resize' },
-    { a: br, b: bl, cursor: 'ns-resize' },
-    { a: bl, b: tl, cursor: 'ew-resize' },
+    {
+      a: tl,
+      b: tr,
+      cursor: getResizeCursorFromDirection({
+        x: (tl.x + tr.x) / 2 - center.x,
+        y: (tl.y + tr.y) / 2 - center.y,
+      }),
+    },
+    {
+      a: tr,
+      b: br,
+      cursor: getResizeCursorFromDirection({
+        x: (tr.x + br.x) / 2 - center.x,
+        y: (tr.y + br.y) / 2 - center.y,
+      }),
+    },
+    {
+      a: br,
+      b: bl,
+      cursor: getResizeCursorFromDirection({
+        x: (br.x + bl.x) / 2 - center.x,
+        y: (br.y + bl.y) / 2 - center.y,
+      }),
+    },
+    {
+      a: bl,
+      b: tl,
+      cursor: getResizeCursorFromDirection({
+        x: (bl.x + tl.x) / 2 - center.x,
+        y: (bl.y + tl.y) / 2 - center.y,
+      }),
+    },
   ];
   for (const edge of edges) {
     if (distToSegment(screenPoint, edge.a, edge.b) <= EDGE_DIST) {
@@ -619,6 +683,10 @@ function hitTestScreenHandles(
   }
 
   return null;
+}
+
+function midpoint(a: Vec2, b: Vec2): Vec2 {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
 function dist(a: Vec2, b: Vec2): number {
