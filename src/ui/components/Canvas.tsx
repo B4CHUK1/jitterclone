@@ -34,6 +34,8 @@ import {
 import { useDocumentStore, useEditorStore, useViewportStore } from '@/state';
 import { SelectionOverlay } from '@/ui/overlays/SelectionOverlay';
 import { SnapOverlay } from '@/ui/overlays/SnapOverlay';
+import { RotateTooltipOverlay } from '@/ui/overlays/RotateTooltipOverlay';
+import { ROTATE_CURSOR } from '@/ui/cursors';
 import styles from './Canvas.module.css';
 
 // ── Drag threshold to distinguish click from drag ──
@@ -76,7 +78,7 @@ export function Canvas() {
   const [hoverCursor, setHoverCursor] = useState<string>('default');
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const [rotateTooltip, setRotateTooltip] = useState<{
-    screen: Vec2;
+    client: Vec2;
     angle: number;
     snapped: boolean;
   } | null>(null);
@@ -87,6 +89,7 @@ export function Canvas() {
 
   const doc = useDocumentStore((s) => s.document);
   const updateTransform = useDocumentStore((s) => s.updateTransform);
+  const updateTransforms = useDocumentStore((s) => s.updateTransforms);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const select = useEditorStore((s) => s.select);
   const selectMultiple = useEditorStore((s) => s.selectMultiple);
@@ -257,7 +260,7 @@ export function Canvas() {
       const scene = getScene();
       const hit = hitTestPoint(scene, world);
       if (hit) {
-        setHoverCursor(selectedIds.has(hit.node.id) ? 'move' : 'default');
+        setHoverCursor(selectedIds.has(hit.node.id) ? 'grab' : 'default');
       } else {
         setHoverCursor('default');
       }
@@ -429,10 +432,10 @@ export function Canvas() {
 
       if (phaseRef.current === 'rotating' && rotateStateRef.current) {
         const updates = updateRotate(rotateStateRef.current, world, e.shiftKey);
-        updateTransform(rotateStateRef.current.nodeId, updates);
+        updateTransforms(updates.updates);
         setRotateTooltip({
-          screen,
-          angle: updates.rotation,
+          client: { x: e.clientX, y: e.clientY },
+          angle: updates.primaryRotation,
           snapped: e.shiftKey,
         });
         tick();
@@ -479,6 +482,7 @@ export function Canvas() {
       getScene,
       selectMultiple,
       tick,
+      updateTransforms,
     ],
   );
 
@@ -549,16 +553,25 @@ export function Canvas() {
       containerRef.current?.setPointerCapture(e.pointerId);
 
       if (handle.startsWith('rotate-')) {
-        rotateStateRef.current = beginRotate(
-          world,
-          nodeId,
-          node.transform,
-          renderNode?.worldMatrix,
-        );
+        const rotateTargets = [...selectedIds]
+          .map((id) => {
+            const targetNode = doc.nodes[id];
+            const targetRenderNode = findRenderNode(scene, id);
+            if (!targetNode || !targetRenderNode) return null;
+            return {
+              nodeId: id,
+              transform: targetNode.transform,
+              worldMatrix: targetRenderNode.worldMatrix,
+            };
+          })
+          .filter((target): target is NonNullable<typeof target> => target !== null);
+
+        if (rotateTargets.length === 0) return;
+        rotateStateRef.current = beginRotate(world, rotateTargets);
         phaseRef.current = 'rotating';
-        setInteractionCursor('grabbing');
+        setInteractionCursor(ROTATE_CURSOR);
         setRotateTooltip({
-          screen,
+          client: { x: e.clientX, y: e.clientY },
           angle: node.transform.rotation,
           snapped: false,
         });
@@ -626,8 +639,8 @@ export function Canvas() {
       <SnapOverlay
         guides={snapGuides}
         worldToScreen={worldToScreen}
-        rotateTooltip={rotateTooltip}
       />
+      <RotateTooltipOverlay tooltip={rotateTooltip} />
     </div>
   );
 }
@@ -777,7 +790,7 @@ function hitTestScreenHandles(
 
   for (const rc of rotCorners) {
     if (dist(screenPoint, rc) <= ROT_RADIUS) {
-      return { cursor: 'grab' };
+      return { cursor: ROTATE_CURSOR };
     }
   }
 

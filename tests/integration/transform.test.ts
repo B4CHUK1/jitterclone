@@ -162,18 +162,18 @@ describe('Resize interaction', () => {
 describe('Rotate interaction', () => {
   it('rotates element', () => {
     const t = { ...defaultTransform(), x: 0, y: 0, width: 100, height: 100 };
-    const state = beginRotate(vec2(100, 50), 'a', t);
+    const state = beginRotate(vec2(100, 50), [{ nodeId: 'a', transform: t }]);
 
     const result = updateRotate(state, vec2(50, 100), false);
-    expect(Math.abs(result.rotation)).toBeGreaterThan(0);
+    expect(Math.abs(result.primaryRotation)).toBeGreaterThan(0);
   });
 
   it('snaps rotation to 15 degrees', () => {
     const t = { ...defaultTransform(), x: 0, y: 0, width: 100, height: 100 };
-    const state = beginRotate(vec2(100, 50), 'a', t);
+    const state = beginRotate(vec2(100, 50), [{ nodeId: 'a', transform: t }]);
 
     const result = updateRotate(state, vec2(90, 20), true);
-    expect(result.rotation % 15).toBeCloseTo(0);
+    expect(result.primaryRotation % 15).toBeCloseTo(0);
   });
 
   it('keeps world anchor stable while rotating (no x/y drift)', () => {
@@ -190,17 +190,40 @@ describe('Rotate interaction', () => {
     const startMatrix = computeLocalMatrix(t);
     const startAnchor = getWorldAnchor(t, startMatrix);
 
-    const state = beginRotate(vec2(startAnchor.x + 80, startAnchor.y), 'a', t);
+    const state = beginRotate(vec2(startAnchor.x + 80, startAnchor.y), [{ nodeId: 'a', transform: t }]);
     const result = updateRotate(state, vec2(startAnchor.x, startAnchor.y + 100), false);
 
-    expect(result).not.toHaveProperty('x');
-    expect(result).not.toHaveProperty('y');
+    const update = result.updates.get('a');
+    expect(update).toBeDefined();
+    expect(update).toHaveProperty('x');
+    expect(update).toHaveProperty('y');
 
-    const transformed = { ...t, rotation: result.rotation };
+    const transformed = { ...t, ...update };
     const afterMatrix = computeLocalMatrix(transformed);
     const afterAnchor = getWorldAnchor(transformed, afterMatrix);
 
     expect(afterAnchor.x).toBeCloseTo(startAnchor.x, 6);
     expect(afterAnchor.y).toBeCloseTo(startAnchor.y, 6);
+  });
+
+  it('rotates multiple elements around shared selection center', () => {
+    const a = { ...defaultTransform(), x: 0, y: 0, width: 100, height: 100 };
+    const b = { ...defaultTransform(), x: 200, y: 0, width: 100, height: 100 };
+
+    const state = beginRotate(
+      vec2(250, 50),
+      [
+        { nodeId: 'a', transform: a },
+        { nodeId: 'b', transform: b },
+      ],
+    );
+
+    const result = updateRotate(state, vec2(150, 150), false);
+    const updateA = result.updates.get('a')!;
+    const updateB = result.updates.get('b')!;
+
+    expect(updateA.x).not.toBe(a.x);
+    expect(updateB.x).not.toBe(b.x);
+    expect(updateA.rotation).toBeCloseTo(updateB.rotation ?? 0, 6);
   });
 });
