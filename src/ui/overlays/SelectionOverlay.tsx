@@ -9,7 +9,6 @@ interface SelectionOverlayProps {
   worldToScreen: (p: Vec2) => Vec2;
   onHandlePointerDown: (e: React.PointerEvent, handle: string) => void;
   marqueeScreen: { x: number; y: number; width: number; height: number } | null;
-  interactionCursor: string | null;
 }
 
 export function SelectionOverlay({
@@ -17,7 +16,6 @@ export function SelectionOverlay({
   worldToScreen,
   onHandlePointerDown,
   marqueeScreen,
-  interactionCursor,
 }: SelectionOverlayProps) {
   const overlays = useMemo(() => {
     return selectedNodes.map((rn) => {
@@ -30,7 +28,6 @@ export function SelectionOverlay({
   return (
     <div
       className={styles.overlay}
-      style={interactionCursor ? { cursor: interactionCursor, pointerEvents: 'auto' } : undefined}
     >
       {overlays.map(({ id, screenCorners }) => (
         <SelectionBox

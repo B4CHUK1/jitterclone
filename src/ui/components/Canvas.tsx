@@ -434,7 +434,7 @@ export function Canvas() {
     [select, toggleSelect, resetInteraction],
   );
 
-  // ── Pointer cancel / lost capture — safety cleanup ──
+  // ── Pointer cancel / window blur — safety cleanup ──
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -445,16 +445,13 @@ export function Canvas() {
       }
     };
 
+    // pointercancel: browser cancelled the gesture (e.g. touch interrupted)
     container.addEventListener('pointercancel', cleanup);
-    container.addEventListener('lostpointercapture', cleanup);
-    // Also handle pointer up outside window
-    window.addEventListener('pointerup', cleanup);
+    // blur: user switched windows/tabs during an interaction
     window.addEventListener('blur', cleanup);
 
     return () => {
       container.removeEventListener('pointercancel', cleanup);
-      container.removeEventListener('lostpointercapture', cleanup);
-      window.removeEventListener('pointerup', cleanup);
       window.removeEventListener('blur', cleanup);
     };
   }, [resetInteraction]);
@@ -514,20 +511,19 @@ export function Canvas() {
       ref={containerRef}
       className={styles.canvasContainer}
       style={{ cursor: effectiveCursor }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
     >
       <canvas
         ref={canvasRef}
         className={styles.canvas}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
       />
       <SelectionOverlay
         selectedNodes={selectedRenderNodes}
         worldToScreen={worldToScreen}
         onHandlePointerDown={handleHandlePointerDown}
         marqueeScreen={marqueeScreenRect}
-        interactionCursor={interactionCursor}
       />
     </div>
   );
