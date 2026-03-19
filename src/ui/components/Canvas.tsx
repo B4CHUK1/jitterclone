@@ -469,12 +469,19 @@ export function Canvas() {
       if (!nodeId) return;
       const node = doc.nodes[nodeId];
       if (!node) return;
+      const scene = getScene();
+      const renderNode = findRenderNode(scene, nodeId);
 
       pointerIdRef.current = e.pointerId;
       containerRef.current?.setPointerCapture(e.pointerId);
 
       if (handle.startsWith('rotate-')) {
-        rotateStateRef.current = beginRotate(world, nodeId, node.transform);
+        rotateStateRef.current = beginRotate(
+          world,
+          nodeId,
+          node.transform,
+          renderNode?.worldMatrix,
+        );
         phaseRef.current = 'rotating';
         setInteractionCursor('grabbing');
       } else {
@@ -489,7 +496,7 @@ export function Canvas() {
         setInteractionCursor(getResizeCursor(handle));
       }
     },
-    [clientToScreen, screenToWorld, selectedIds, doc.nodes],
+    [clientToScreen, screenToWorld, selectedIds, doc.nodes, getScene],
   );
 
   // ── Selected render nodes for overlay ──

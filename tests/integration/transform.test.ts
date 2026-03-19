@@ -4,6 +4,7 @@ import { beginDrag, updateDrag } from '@/engine/interaction/dragInteraction';
 import { beginResize, updateResize } from '@/engine/interaction/resizeInteraction';
 import { beginRotate, updateRotate } from '@/engine/interaction/rotateInteraction';
 import { vec2 } from '@/engine/transform/math';
+import { computeLocalMatrix, getWorldAnchor } from '@/engine/transform';
 
 const NO_MOD = { shift: false, alt: false };
 
@@ -115,5 +116,33 @@ describe('Rotate interaction', () => {
 
     const result = updateRotate(state, vec2(90, 20), true);
     expect(result.rotation % 15).toBeCloseTo(0);
+  });
+
+  it('keeps world anchor stable while rotating (no x/y drift)', () => {
+    const t = {
+      ...defaultTransform(),
+      x: 300,
+      y: 200,
+      width: 240,
+      height: 140,
+      anchorX: 0.25,
+      anchorY: 0.75,
+      rotation: 10,
+    };
+    const startMatrix = computeLocalMatrix(t);
+    const startAnchor = getWorldAnchor(t, startMatrix);
+
+    const state = beginRotate(vec2(startAnchor.x + 80, startAnchor.y), 'a', t);
+    const result = updateRotate(state, vec2(startAnchor.x, startAnchor.y + 100), false);
+
+    expect(result).not.toHaveProperty('x');
+    expect(result).not.toHaveProperty('y');
+
+    const transformed = { ...t, rotation: result.rotation };
+    const afterMatrix = computeLocalMatrix(transformed);
+    const afterAnchor = getWorldAnchor(transformed, afterMatrix);
+
+    expect(afterAnchor.x).toBeCloseTo(startAnchor.x, 6);
+    expect(afterAnchor.y).toBeCloseTo(startAnchor.y, 6);
   });
 });

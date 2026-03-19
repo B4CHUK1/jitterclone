@@ -7,6 +7,7 @@ import type { Vec2 } from '@/engine/transform';
 import type { Transform } from '@/engine/transform/transform';
 import { radToDeg, normalizeAngle, snapAngle } from '@/engine/transform';
 import { getWorldAnchor, computeLocalMatrix } from '@/engine/transform';
+import type { Matrix2D } from '@/engine/transform/math';
 
 export interface RotateState {
   readonly nodeId: string;
@@ -19,9 +20,12 @@ export function beginRotate(
   worldPoint: Vec2,
   nodeId: string,
   transform: Transform,
+  worldMatrix?: Matrix2D,
 ): RotateState {
-  const worldMatrix = computeLocalMatrix(transform); // for root-level nodes
-  const anchorWorld = getWorldAnchor(transform, worldMatrix);
+  // If we already have the scene world matrix, use it.
+  // Fallback to local matrix for root-level nodes/tests.
+  const effectiveWorldMatrix = worldMatrix ?? computeLocalMatrix(transform);
+  const anchorWorld = getWorldAnchor(transform, effectiveWorldMatrix);
 
   const startAngleRad = Math.atan2(
     worldPoint.y - anchorWorld.y,
@@ -40,7 +44,7 @@ export function updateRotate(
   state: RotateState,
   currentWorldPoint: Vec2,
   snap: boolean,
-): { rotation: number; x: number; y: number } {
+): { rotation: number } {
   const currentAngleRad = Math.atan2(
     currentWorldPoint.y - state.anchorWorld.y,
     currentWorldPoint.x - state.anchorWorld.x,
@@ -53,30 +57,7 @@ export function updateRotate(
     newRotation = snapAngle(newRotation, 15);
   }
 
-  // For root-level elements, position stays the same when rotating around anchor
-  // because position IS the top-left corner, and the matrix handles the rest.
-  // But we need to adjust position to keep the anchor point stable.
-  const st = state.startTransform;
-  const ax = st.anchorX * st.width;
-  const ay = st.anchorY * st.height;
-
-  // Compute where the anchor would be with old rotation
-  const oldRad = (st.rotation * Math.PI) / 180;
-  const oldAnchorX = st.x + ax * Math.cos(oldRad) - ay * Math.sin(oldRad);
-  const oldAnchorY = st.y + ax * Math.sin(oldRad) + ay * Math.cos(oldRad);
-
-  // Compute where the anchor would be with new rotation
-  const newRad = (newRotation * Math.PI) / 180;
-  const newAnchorX = st.x + ax * Math.cos(newRad) - ay * Math.sin(newRad);
-  const newAnchorY = st.y + ax * Math.sin(newRad) + ay * Math.cos(newRad);
-
-  // Adjust position to keep anchor stable
-  const adjustX = oldAnchorX - newAnchorX;
-  const adjustY = oldAnchorY - newAnchorY;
-
   return {
     rotation: newRotation,
-    x: st.x + adjustX,
-    y: st.y + adjustY,
   };
 }
