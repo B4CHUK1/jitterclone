@@ -1,54 +1,100 @@
 // src/components/Canvas/Canvas.jsx
-import { useRef, useEffect, useState, useCallback } from 'react'
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { Stage, Layer } from 'react-konva'
 import useEditorStore from '../../store/editorStore'
 import useSceneStore from '../../store/sceneStore'
 import CanvasElement from './CanvasElement'
 import CanvasBackground from './CanvasBackground'
 import { CURSOR_ROTATE } from '../../cursors'
+import { getElementOverlays } from '../../utils/elementOverlays'
 
 const CANVAS_W = 1280
 const CANVAS_H = 720
 
-// Compute the 4 corners of an element in screen-space.
-// Also returns the center (average of corners = rotated element's center).
-function computeCorners(el, stage) {
-  if (!el || !stage) return null
+// ─── Edge resize overlay ──────────────────────────────────────────────────────
+// Covers the full length of one edge, rotated to match the element's rotation.
+// `side`: 'top' | 'right' | 'bottom' | 'left'
+function EdgeOverlay({ side, overlays, onPointerDown }) {
+  const { tl, tr, br, bl, angleDeg, sWidth, sHeight } = overlays
 
-  const x      = el.properties.x.value
-  const y      = el.properties.y.value
-  const w      = el.properties.width.value
-  const h      = el.properties.height.value
-  const r      = el.properties.rotation.value * (Math.PI / 180)
-  const cos    = Math.cos(r)
-  const sin    = Math.sin(r)
-  const tf     = stage.getAbsoluteTransform()
+  // Midpoint of the edge in screen-space
+  const mid = {
+    top:    { x: (tl.x + tr.x) / 2, y: (tl.y + tr.y) / 2 },
+    right:  { x: (tr.x + br.x) / 2, y: (tr.y + br.y) / 2 },
+    bottom: { x: (bl.x + br.x) / 2, y: (bl.y + br.y) / 2 },
+    left:   { x: (tl.x + bl.x) / 2, y: (tl.y + bl.y) / 2 },
+  }[side]
 
-  const corners = [
-    { cx: 0, cy: 0 },
-    { cx: w, cy: 0 },
-    { cx: w, cy: h },
-    { cx: 0, cy: h },
-  ].map(({ cx, cy }) =>
-    tf.point({ x: x + cx * cos - cy * sin, y: y + cx * sin + cy * cos }),
-  )
+  // Edge length in screen-space
+  const edgeLen = { top: sWidth, right: sHeight, bottom: sWidth, left: sHeight }[side]
 
-  // Center = average of corners (works correctly for any rotation)
-  const center = {
-    x: (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4,
-    y: (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4,
+  // Thickness of the hit area
+  const THICKNESS = 12
+
+  // CSS cursor
+  const cursorMap = {
+    top:    'ns-resize',
+    bottom: 'ns-resize',
+    left:   'ew-resize',
+    right:  'ew-resize',
   }
 
-  return { corners, center }
+  return (
+    <div
+      style={{
+        position:        'absolute',
+        left:            mid.x - edgeLen / 2,
+        top:             mid.y - THICKNESS / 2,
+        width:           edgeLen,
+        height:          THICKNESS,
+        transform:       `rotate(${angleDeg}deg)`,
+        transformOrigin: 'center center',
+        cursor:          cursorMap[side],
+        zIndex:          10,
+        // Uncomment to debug: background: 'rgba(0,200,255,0.2)',
+      }}
+      onPointerDown={(e) => onPointerDown(e, side)}
+    />
+  )
+}
+
+// ─── Corner rotation overlay ───────────────────────────────────────────────────
+// 20×20 div positioned OUTSIDE the corner, radially from center.
+function CornerRotateOverlay({ corner, overlays, onPointerDown, cursorIndex }) {
+  const { tl, tr, br, bl, center } = overlays
+  const pts = { tl, tr, br, bl }
+  const pt = pts[corner]
+  const dx = pt.x - center.x
+  const dy = pt.y - center.y
+  const len = Math.sqrt(dx * dx + dy * dy) || 1
+  const REACH = 14
+  const x = pt.x + (dx / len) * REACH - 10
+  const y = pt.y + (dy / len) * REACH - 10
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left:     x,
+        top:      y,
+        width:    20,
+        height:   20,
+        cursor:   CURSOR_ROTATE[cursorIndex],
+        zIndex:   11,
+        // Uncomment to debug: background: 'rgba(232,255,0,0.15)',
+      }}
+      onPointerDown={(e) => onPointerDown(e, cursorIndex)}
+    />
+  )
 }
 
 export default function Canvas() {
-  const stageRef    = useRef(null)
+  const stageRef     = useRef(null)
   const containerRef = useRef(null)
   const [stageDims, setStageDims] = useState({ w: window.innerWidth, h: window.innerHeight })
 
   const { selectedId, select, deselect } = useEditorStore()
-  const elements       = useSceneStore((s) => s.elements)
+  const elements         = useSceneStore((s) => s.elements)
   const updateProperties = useSceneStore((s) => s.updateProperties)
 
   // Map from element id → Konva Image node (populated by CanvasElement via onRegisterRef)
@@ -58,20 +104,17 @@ export default function Canvas() {
     else       elementRefsMap.current.delete(id)
   }, [])
 
-  // Rotation overlay state
-  const [rotInfo, setRotInfo] = useState(null) // { corners, center } in screen-px
-  // Incrementing this triggers corner recomputation (after zoom/pan/drag)
+  // Incrementing this triggers overlay recomputation (after zoom/pan/drag)
   const [stageVersion, setStageVersion] = useState(0)
 
   const selectedEl = elements.find((e) => e.id === selectedId) ?? null
 
-  // Recompute corners whenever selection, element properties, or stage transform changes
-  useEffect(() => {
-    if (!selectedEl || !stageRef.current) {
-      setRotInfo(null)
-      return
-    }
-    setRotInfo(computeCorners(selectedEl, stageRef.current))
+  // Compute all overlay positions whenever selection, element properties, or stage transform changes
+  const overlays = useMemo(() => {
+    if (!selectedEl || !stageRef.current) return null
+    return getElementOverlays(selectedEl, stageRef.current)
+    // stageVersion is the dependency that captures zoom/pan/drag changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEl, stageVersion])
 
   // Fit-to-screen on mount + resize
@@ -130,7 +173,7 @@ export default function Canvas() {
     if (e.target === e.target.getStage()) deselect()
   }
 
-  // ─── Rotation overlay ───────────────────────────────────────────────────────
+  // ─── Rotation drag ────────────────────────────────────────────────────────────
 
   const handleRotationStart = useCallback((e, cornerIndex) => {
     e.preventDefault()
@@ -139,8 +182,6 @@ export default function Canvas() {
     const node = elementRefsMap.current.get(selectedId)
     if (!node || !stageRef.current) return
 
-    // Compute the visual center of the element in canvas-space
-    // (rotation in Konva is around the node origin, so we derive actual center)
     const r0  = node.rotation() * (Math.PI / 180)
     const cos = Math.cos(r0)
     const sin = Math.sin(r0)
@@ -156,9 +197,6 @@ export default function Canvas() {
     ) * (180 / Math.PI)
 
     const initialRotation = node.rotation()
-    // Snapshot canvas center so "rotate around center" math stays consistent
-    const initX = node.x()
-    const initY = node.y()
     const W = node.width()
     const H = node.height()
 
@@ -171,7 +209,6 @@ export default function Canvas() {
       let newRotation = initialRotation + (currentAngle - startAngle)
       if (mv.shiftKey) newRotation = Math.round(newRotation / 15) * 15
 
-      // Keep visual center fixed while rotating (Figma-style center rotation)
       const newR   = newRotation * (Math.PI / 180)
       const newCos = Math.cos(newR)
       const newSin = Math.sin(newR)
@@ -179,8 +216,6 @@ export default function Canvas() {
       node.x(centerCanvas.x - (W / 2) * newCos + (H / 2) * newSin)
       node.y(centerCanvas.y - (W / 2) * newSin - (H / 2) * newCos)
       node.getLayer()?.batchDraw()
-
-      // Keep rotation zones in sync with the moving element
       setStageVersion((v) => v + 1)
     }
 
@@ -198,20 +233,85 @@ export default function Canvas() {
     window.addEventListener('pointerup',   onUp)
   }, [selectedId, updateProperties])
 
-  // Rotation zones are positioned OUTSIDE the corners so they don't overlap
-  // with the Transformer's resize anchors. Direction = outward from center.
-  const rotationZones = rotInfo ? rotInfo.corners.map((corner, i) => {
-    const { center } = rotInfo
-    const dx = corner.x - center.x
-    const dy = corner.y - center.y
-    const len = Math.sqrt(dx * dx + dy * dy) || 1
-    const REACH = 14 // px past the corner where zone center sits
-    return {
-      x: corner.x + (dx / len) * REACH - 10,
-      y: corner.y + (dy / len) * REACH - 10,
-      i,
+  // ─── Edge resize drag ─────────────────────────────────────────────────────────
+
+  const handleEdgeResizeStart = useCallback((e, side) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const node = elementRefsMap.current.get(selectedId)
+    if (!node || !stageRef.current) return
+
+    const stage = stageRef.current
+    const scale = stage.scaleX()
+    const r     = node.rotation() * (Math.PI / 180)
+    const cos   = Math.cos(r)
+    const sin   = Math.sin(r)
+
+    // Snapshot initial state
+    const initX      = node.x()
+    const initY      = node.y()
+    const initWidth  = node.width()
+    const initHeight = node.height()
+    let   lastClientX = e.clientX
+    let   lastClientY = e.clientY
+
+    const onMove = (mv) => {
+      // Screen-space delta
+      const screenDx = mv.clientX - lastClientX
+      const screenDy = mv.clientY - lastClientY
+      lastClientX = mv.clientX
+      lastClientY = mv.clientY
+
+      // Project into the element's local (rotated) space
+      const localDx = (screenDx * cos + screenDy * sin) / scale
+      const localDy = (-screenDx * sin + screenDy * cos) / scale
+
+      let newX      = node.x()
+      let newY      = node.y()
+      let newWidth  = node.width()
+      let newHeight = node.height()
+
+      if (side === 'right') {
+        newWidth = Math.max(20, newWidth + localDx)
+      } else if (side === 'bottom') {
+        newHeight = Math.max(20, newHeight + localDy)
+      } else if (side === 'left') {
+        const delta = Math.min(localDx, newWidth - 20)
+        newWidth  = newWidth - delta
+        // Move origin along the left edge direction (local X axis = cos, sin in world space)
+        newX = newX + delta * cos
+        newY = newY + delta * sin
+      } else if (side === 'top') {
+        const delta = Math.min(localDy, newHeight - 20)
+        newHeight = newHeight - delta
+        // Move origin along the top edge direction (local Y axis = -sin, cos in world space)
+        newX = newX - delta * sin
+        newY = newY + delta * cos
+      }
+
+      node.x(newX)
+      node.y(newY)
+      node.width(newWidth)
+      node.height(newHeight)
+      node.getLayer()?.batchDraw()
+      setStageVersion((v) => v + 1)
     }
-  }) : null
+
+    const onUp = () => {
+      updateProperties(selectedId, {
+        x:      node.x(),
+        y:      node.y(),
+        width:  node.width(),
+        height: node.height(),
+      })
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup',   onUp)
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup',   onUp)
+  }, [selectedId, updateProperties])
 
   return (
     <div
@@ -244,24 +344,28 @@ export default function Canvas() {
         </Layer>
       </Stage>
 
-      {/* Rotation overlay — HTML divs positioned over the Stage canvas */}
-      {rotationZones && rotationZones.map(({ x, y, i }) => (
-        <div
-          key={i}
-          style={{
-            position: 'absolute',
-            left: x,
-            top:  y,
-            width: 20,
-            height: 20,
-            cursor: CURSOR_ROTATE[i],
-            zIndex: 10,
-            // Uncomment to debug zone positions:
-            // background: 'rgba(232,255,0,0.15)',
-          }}
-          onPointerDown={(e) => handleRotationStart(e, i)}
-        />
-      ))}
+      {/* HTML overlays — edge resize + corner rotation — positioned over Stage canvas */}
+      {overlays && (
+        <>
+          {['top', 'right', 'bottom', 'left'].map((side) => (
+            <EdgeOverlay
+              key={side}
+              side={side}
+              overlays={overlays}
+              onPointerDown={handleEdgeResizeStart}
+            />
+          ))}
+          {[['tl', 0], ['tr', 1], ['br', 2], ['bl', 3]].map(([corner, idx]) => (
+            <CornerRotateOverlay
+              key={corner}
+              corner={corner}
+              overlays={overlays}
+              onPointerDown={handleRotationStart}
+              cursorIndex={idx}
+            />
+          ))}
+        </>
+      )}
     </div>
   )
 }

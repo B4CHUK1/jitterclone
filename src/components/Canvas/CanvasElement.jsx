@@ -194,6 +194,7 @@ export default function CanvasElement({ element, isSelected, onSelect, onRegiste
           borderStrokeWidth={1}
           // Rotation handled by overlay — disable Konva's built-in rotation
           rotateEnabled={false}
+          enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
           keepRatio={false}
           flipEnabled={false}
           boundBoxFunc={(oldBox, newBox) => {
