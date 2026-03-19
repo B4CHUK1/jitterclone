@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { Vec2 } from '@/engine/transform';
 import { getWorldCorners } from '@/engine/transform';
+import { getResizeCursorFromDirection } from '@/engine/interaction/resizeCursor';
 import type { RenderNode } from '@/engine/scene';
 import styles from './SelectionOverlay.module.css';
 
@@ -63,31 +64,51 @@ function SelectionBox({
   onHandlePointerDown: (e: React.PointerEvent, handle: string) => void;
 }) {
   const [tl, tr, br, bl] = corners;
+  const center = {
+    x: (tl.x + tr.x + br.x + bl.x) / 4,
+    y: (tl.y + tr.y + br.y + bl.y) / 4,
+  };
 
   // SVG outline path
   const pathD = `M${tl.x},${tl.y} L${tr.x},${tr.y} L${br.x},${br.y} L${bl.x},${bl.y} Z`;
 
   // Edge definitions: each edge is a line segment from start to end
   const edges = [
-    { handle: 'top', a: tl, b: tr, cursor: 'ns-resize' },
-    { handle: 'right', a: tr, b: br, cursor: 'ew-resize' },
-    { handle: 'bottom', a: br, b: bl, cursor: 'ns-resize' },
-    { handle: 'left', a: bl, b: tl, cursor: 'ew-resize' },
+    {
+      handle: 'top',
+      a: tl,
+      b: tr,
+      cursor: getResizeCursorFromDirection(vector(center, midpoint(tl, tr))),
+    },
+    {
+      handle: 'right',
+      a: tr,
+      b: br,
+      cursor: getResizeCursorFromDirection(vector(center, midpoint(tr, br))),
+    },
+    {
+      handle: 'bottom',
+      a: br,
+      b: bl,
+      cursor: getResizeCursorFromDirection(vector(center, midpoint(br, bl))),
+    },
+    {
+      handle: 'left',
+      a: bl,
+      b: tl,
+      cursor: getResizeCursorFromDirection(vector(center, midpoint(bl, tl))),
+    },
   ];
 
   // Corner handles
   const cornerHandles = [
-    { pos: tl, handle: 'top-left', cursor: 'nwse-resize' },
-    { pos: tr, handle: 'top-right', cursor: 'nesw-resize' },
-    { pos: br, handle: 'bottom-right', cursor: 'nwse-resize' },
-    { pos: bl, handle: 'bottom-left', cursor: 'nesw-resize' },
+    { pos: tl, handle: 'top-left', cursor: getResizeCursorFromDirection(vector(center, tl)) },
+    { pos: tr, handle: 'top-right', cursor: getResizeCursorFromDirection(vector(center, tr)) },
+    { pos: br, handle: 'bottom-right', cursor: getResizeCursorFromDirection(vector(center, br)) },
+    { pos: bl, handle: 'bottom-left', cursor: getResizeCursorFromDirection(vector(center, bl)) },
   ];
 
   // Rotation handles — offset outward from corners
-  const center = {
-    x: (tl.x + tr.x + br.x + bl.x) / 4,
-    y: (tl.y + tr.y + br.y + bl.y) / 4,
-  };
   const rotOffset = 22;
   const rotHandles = [
     { pos: offsetFromCenter(tl, center, rotOffset), handle: 'rotate-top-left' },
@@ -199,4 +220,12 @@ function offsetFromCenter(corner: Vec2, center: Vec2, offset: number): Vec2 {
     x: center.x + dx * factor,
     y: center.y + dy * factor,
   };
+}
+
+function midpoint(a: Vec2, b: Vec2): Vec2 {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+function vector(a: Vec2, b: Vec2): Vec2 {
+  return { x: b.x - a.x, y: b.y - a.y };
 }

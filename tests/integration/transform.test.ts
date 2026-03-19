@@ -4,7 +4,7 @@ import { beginDrag, updateDrag } from '@/engine/interaction/dragInteraction';
 import { beginResize, updateResize } from '@/engine/interaction/resizeInteraction';
 import { beginRotate, updateRotate } from '@/engine/interaction/rotateInteraction';
 import { vec2 } from '@/engine/transform/math';
-import { computeLocalMatrix, getWorldAnchor } from '@/engine/transform';
+import { computeLocalMatrix, getWorldAnchor, localToWorld } from '@/engine/transform';
 
 const NO_MOD = { shift: false, alt: false };
 
@@ -98,6 +98,64 @@ describe('Resize interaction', () => {
     const result = updateResize(state, vec2(250, 130), NO_MOD);
     expect(result.width).toBe(250);
     expect(result.height).toBe(130);
+  });
+
+  it('keeps opposite corner fixed when resizing a rotated element', () => {
+    const t = {
+      ...defaultTransform(),
+      x: 220,
+      y: 180,
+      width: 180,
+      height: 120,
+      rotation: 15,
+      anchorX: 0.5,
+      anchorY: 0.5,
+    };
+    const startMatrix = computeLocalMatrix(t);
+    const startHandle = localToWorld(startMatrix, vec2(t.width, t.height));
+    const fixedBefore = localToWorld(startMatrix, vec2(0, 0));
+
+    const state = beginResize('bottom-right', startHandle, 'a', t);
+    const result = updateResize(
+      state,
+      vec2(startHandle.x + 40, startHandle.y + 20),
+      NO_MOD,
+    );
+
+    const after = { ...t, ...result };
+    const afterMatrix = computeLocalMatrix(after);
+    const fixedAfter = localToWorld(afterMatrix, vec2(0, 0));
+    expect(fixedAfter.x).toBeCloseTo(fixedBefore.x, 6);
+    expect(fixedAfter.y).toBeCloseTo(fixedBefore.y, 6);
+  });
+
+  it('keeps opposite edge midpoint fixed for rotated edge resize', () => {
+    const t = {
+      ...defaultTransform(),
+      x: 120,
+      y: 90,
+      width: 240,
+      height: 160,
+      rotation: 15,
+      anchorX: 0.3,
+      anchorY: 0.6,
+    };
+    const startMatrix = computeLocalMatrix(t);
+    const startHandle = localToWorld(startMatrix, vec2(t.width, t.height / 2));
+    const fixedBefore = localToWorld(startMatrix, vec2(0, t.height / 2));
+
+    const state = beginResize('right', startHandle, 'a', t);
+    const result = updateResize(
+      state,
+      vec2(startHandle.x + 35, startHandle.y - 5),
+      NO_MOD,
+    );
+
+    const after = { ...t, ...result };
+    const afterMatrix = computeLocalMatrix(after);
+    const fixedAfter = localToWorld(afterMatrix, vec2(0, after.height / 2));
+    expect(fixedAfter.x).toBeCloseTo(fixedBefore.x, 6);
+    expect(fixedAfter.y).toBeCloseTo(fixedBefore.y, 6);
   });
 });
 

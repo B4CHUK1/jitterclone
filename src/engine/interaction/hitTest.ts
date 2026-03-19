@@ -5,6 +5,7 @@
 
 import type { Vec2 } from '@/engine/transform';
 import { worldToLocal } from '@/engine/transform';
+import { getResizeCursorFromDirection } from './resizeCursor';
 import type { RenderNode } from '@/engine/scene';
 import { flattenSceneGraph } from '@/engine/scene';
 import type { BoundingBox } from '@/engine/transform/math';
@@ -90,6 +91,7 @@ export function hitTestHandles(
   screenPoint: Vec2,
 ): HandleHit | null {
   const [tl, tr, br, bl] = screenCorners;
+  const center = centerPoint(screenCorners);
 
   // Edge midpoints
   const top = midpoint(tl, tr);
@@ -116,10 +118,26 @@ export function hitTestHandles(
 
   // Check corner handles
   const cornerHandles: { pos: Vec2; type: HandleType; cursor: string }[] = [
-    { pos: tl, type: 'top-left', cursor: 'nwse-resize' },
-    { pos: tr, type: 'top-right', cursor: 'nesw-resize' },
-    { pos: br, type: 'bottom-right', cursor: 'nwse-resize' },
-    { pos: bl, type: 'bottom-left', cursor: 'nesw-resize' },
+    {
+      pos: tl,
+      type: 'top-left',
+      cursor: getResizeCursorFromDirection({ x: tl.x - center.x, y: tl.y - center.y }),
+    },
+    {
+      pos: tr,
+      type: 'top-right',
+      cursor: getResizeCursorFromDirection({ x: tr.x - center.x, y: tr.y - center.y }),
+    },
+    {
+      pos: br,
+      type: 'bottom-right',
+      cursor: getResizeCursorFromDirection({ x: br.x - center.x, y: br.y - center.y }),
+    },
+    {
+      pos: bl,
+      type: 'bottom-left',
+      cursor: getResizeCursorFromDirection({ x: bl.x - center.x, y: bl.y - center.y }),
+    },
   ];
 
   for (const h of cornerHandles) {
@@ -130,10 +148,26 @@ export function hitTestHandles(
 
   // Check edge handles
   const edgeHandles: { pos: Vec2; type: HandleType; cursor: string }[] = [
-    { pos: top, type: 'top', cursor: 'ns-resize' },
-    { pos: right, type: 'right', cursor: 'ew-resize' },
-    { pos: bottom, type: 'bottom', cursor: 'ns-resize' },
-    { pos: left, type: 'left', cursor: 'ew-resize' },
+    {
+      pos: top,
+      type: 'top',
+      cursor: getResizeCursorFromDirection({ x: top.x - center.x, y: top.y - center.y }),
+    },
+    {
+      pos: right,
+      type: 'right',
+      cursor: getResizeCursorFromDirection({ x: right.x - center.x, y: right.y - center.y }),
+    },
+    {
+      pos: bottom,
+      type: 'bottom',
+      cursor: getResizeCursorFromDirection({ x: bottom.x - center.x, y: bottom.y - center.y }),
+    },
+    {
+      pos: left,
+      type: 'left',
+      cursor: getResizeCursorFromDirection({ x: left.x - center.x, y: left.y - center.y }),
+    },
   ];
 
   for (const h of edgeHandles) {
@@ -143,6 +177,13 @@ export function hitTestHandles(
   }
 
   return null;
+}
+
+function centerPoint([tl, tr, br, bl]: [Vec2, Vec2, Vec2, Vec2]): Vec2 {
+  return {
+    x: (tl.x + tr.x + br.x + bl.x) / 4,
+    y: (tl.y + tr.y + br.y + bl.y) / 4,
+  };
 }
 
 function midpoint(a: Vec2, b: Vec2): Vec2 {
