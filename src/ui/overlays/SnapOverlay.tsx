@@ -2,19 +2,12 @@ import type { Vec2 } from '@/engine/transform';
 import type { SnapGuide } from '@/engine/interaction/snapEngine';
 import styles from './SnapOverlay.module.css';
 
-interface RotateTooltip {
-  screen: Vec2;
-  angle: number;
-  snapped: boolean;
-}
-
 interface SnapOverlayProps {
   guides: SnapGuide[];
   worldToScreen: (p: Vec2) => Vec2;
-  rotateTooltip: RotateTooltip | null;
 }
 
-export function SnapOverlay({ guides, worldToScreen, rotateTooltip }: SnapOverlayProps) {
+export function SnapOverlay({ guides, worldToScreen }: SnapOverlayProps) {
   return (
     <div className={styles.overlay}>
       {guides.map((guide, idx) => {
@@ -59,23 +52,6 @@ export function SnapOverlay({ guides, worldToScreen, rotateTooltip }: SnapOverla
         );
       })}
 
-      {rotateTooltip && (
-        <div
-          className={styles.rotateTooltip}
-          style={{
-            left: rotateTooltip.screen.x + 12,
-            top: rotateTooltip.screen.y + 12,
-          }}
-        >
-          {formatAngle(rotateTooltip.angle)}
-          {rotateTooltip.snapped ? ' • snap' : ''}
-        </div>
-      )}
     </div>
   );
-}
-
-function formatAngle(angle: number): string {
-  const rounded = Math.round(angle * 10) / 10;
-  return `${rounded}°`;
 }

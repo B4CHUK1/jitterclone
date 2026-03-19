@@ -3,6 +3,7 @@ import type { Vec2 } from '@/engine/transform';
 import { getWorldCorners } from '@/engine/transform';
 import { getResizeCursorFromDirection } from '@/engine/interaction/resizeCursor';
 import type { RenderNode } from '@/engine/scene';
+import { ROTATE_CURSOR } from '@/ui/cursors';
 import styles from './SelectionOverlay.module.css';
 
 interface SelectionOverlayProps {
@@ -160,7 +161,7 @@ function SelectionBox({
         <div
           key={h.handle}
           className={styles.rotationHit}
-          style={{ left: h.pos.x, top: h.pos.y }}
+          style={{ left: h.pos.x, top: h.pos.y, cursor: ROTATE_CURSOR }}
           onPointerDown={(e) => onHandlePointerDown(e, h.handle)}
         />
       ))}

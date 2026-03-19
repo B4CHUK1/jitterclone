@@ -1,0 +1,13 @@
+.tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  background: color-mix(in srgb, #0f1117 92%, black 8%);
+  color: #f4f6ff;
+  font-size: 11px;
+  line-height: 1;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--color-selection) 45%, #ffffff 10%);
+  white-space: nowrap;
+}
