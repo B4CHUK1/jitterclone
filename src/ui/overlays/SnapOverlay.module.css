@@ -10,6 +10,31 @@
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-selection) 30%, transparent);
 }
 
+.objectGuide {
+  opacity: 0.95;
+}
+
+.canvasGuide {
+  background: color-mix(in srgb, #55c8ff 74%, #ffffff 26%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, #55c8ff 36%, transparent);
+}
+
+.centerGuide {
+  opacity: 1;
+}
+
+.centerGuide.objectGuide {
+  background: color-mix(in srgb, #a58dff 75%, #ffffff 25%);
+}
+
+.centerGuide.canvasGuide {
+  background: color-mix(in srgb, #ffc56e 78%, #ffffff 22%);
+}
+
+.edgeGuide {
+  opacity: 0.82;
+}
+
 .rotateTooltip {
   position: absolute;
   pointer-events: none;

@@ -86,6 +86,27 @@ export function updateNodeTransform(
   };
 }
 
+export function updateManyNodeTransforms(
+  doc: Document,
+  updatesById: Map<string, Partial<Transform>>,
+): Document {
+  if (updatesById.size === 0) return doc;
+
+  const updatedNodes = { ...doc.nodes };
+  let changed = false;
+  for (const [nodeId, updates] of updatesById) {
+    const node = updatedNodes[nodeId];
+    if (!node) continue;
+    updatedNodes[nodeId] = {
+      ...node,
+      transform: { ...node.transform, ...updates },
+    };
+    changed = true;
+  }
+
+  return changed ? { ...doc, nodes: updatedNodes } : doc;
+}
+
 export function updateNodeStyle(
   doc: Document,
   nodeId: string,

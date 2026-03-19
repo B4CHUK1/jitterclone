@@ -24,7 +24,11 @@ export function SnapOverlay({ guides, worldToScreen, rotateTooltip }: SnapOverla
           return (
             <div
               key={`${guide.axis}-${guide.value}-${idx}`}
-              className={styles.guideLine}
+              className={[
+                styles.guideLine,
+                guide.source === 'canvas' ? styles.canvasGuide : styles.objectGuide,
+                guide.kind === 'center' ? styles.centerGuide : styles.edgeGuide,
+              ].join(' ')}
               style={{
                 left: start.x,
                 top: Math.min(start.y, end.y),
@@ -40,7 +44,11 @@ export function SnapOverlay({ guides, worldToScreen, rotateTooltip }: SnapOverla
         return (
           <div
             key={`${guide.axis}-${guide.value}-${idx}`}
-            className={styles.guideLine}
+            className={[
+              styles.guideLine,
+              guide.source === 'canvas' ? styles.canvasGuide : styles.objectGuide,
+              guide.kind === 'center' ? styles.centerGuide : styles.edgeGuide,
+            ].join(' ')}
             style={{
               left: Math.min(start.x, end.x),
               top: start.y,

@@ -10,6 +10,7 @@ import {
   addNode,
   removeNode,
   updateNodeTransform,
+  updateManyNodeTransforms,
   updateNodeStyle,
   updateNodeProps,
 } from '@/document/operations';
@@ -22,6 +23,7 @@ interface DocumentState {
   addNode: (type: NodeType, overrides?: Partial<SceneNode>) => string;
   removeNode: (nodeId: string) => void;
   updateTransform: (nodeId: string, updates: Partial<Transform>) => void;
+  updateTransforms: (updates: Map<string, Partial<Transform>>) => void;
   updateStyle: (nodeId: string, updates: Partial<NodeStyle>) => void;
   updateProps: (nodeId: string, updates: Partial<Pick<SceneNode, 'name' | 'visible' | 'locked'>>) => void;
   getNode: (nodeId: string) => SceneNode | undefined;
@@ -43,6 +45,10 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   updateTransform: (nodeId, updates) => {
     set({ document: updateNodeTransform(get().document, nodeId, updates) });
+  },
+
+  updateTransforms: (updates) => {
+    set({ document: updateManyNodeTransforms(get().document, updates) });
   },
 
   updateStyle: (nodeId, updates) => {

@@ -24,6 +24,7 @@ import type { Vec2 } from '@/engine/transform';
 import { getWorldCorners } from '@/engine/transform';
 import { getResizeCursorFromDirection } from '@/engine/interaction/resizeCursor';
 import {
+  getCanvasBounds,
   getRenderNodeBounds,
   offsetBounds,
   resolveBoundsSnapping,
@@ -388,7 +389,12 @@ export function Canvas() {
             const proposedDx = firstUpdate.x - firstStart.x;
             const proposedDy = firstUpdate.y - firstStart.y;
             const movingBounds = offsetBounds(dragStartBoundsRef.current, proposedDx, proposedDy);
-            const snap = resolveBoundsSnapping(movingBounds, staticBounds, threshold);
+            const snap = resolveBoundsSnapping(
+              movingBounds,
+              staticBounds,
+              getCanvasBounds(doc.width, doc.height),
+              threshold,
+            );
             for (const [id, pos] of updates) {
               updateTransform(id, { x: pos.x + snap.dx, y: pos.y + snap.dy });
             }
@@ -409,7 +415,12 @@ export function Canvas() {
       if (phaseRef.current === 'resizing' && resizeStateRef.current) {
         const mods: ResizeModifiers = { shift: e.shiftKey, alt: e.altKey };
         const updates = updateResize(resizeStateRef.current, world, mods);
-        const snapped = applyResizeSnap(updates, resizeStaticBoundsRef.current, SNAP_THRESHOLD_SCREEN_PX / zoom);
+        const snapped = applyResizeSnap(
+          updates,
+          resizeStaticBoundsRef.current,
+          getCanvasBounds(doc.width, doc.height),
+          SNAP_THRESHOLD_SCREEN_PX / zoom,
+        );
         updateTransform(resizeStateRef.current.nodeId, snapped.transform);
         setSnapGuides(snapped.guides);
         tick();
@@ -462,6 +473,8 @@ export function Canvas() {
       toggleSelect,
       doc.nodes,
       updateTransform,
+      doc.width,
+      doc.height,
       zoom,
       getScene,
       selectMultiple,
@@ -655,6 +668,7 @@ function applyResizeSnap(
     height: number;
   }>,
   staticBounds: readonly WorldBounds[],
+  canvasBounds: WorldBounds,
   threshold: number,
 ): { transform: typeof updates; guides: SnapGuide[] } {
   if (
@@ -676,7 +690,7 @@ function applyResizeSnap(
     centerX: updates.x + updates.width / 2,
     centerY: updates.y + updates.height / 2,
   };
-  const snap = resolveBoundsSnapping(movingBounds, staticBounds, threshold);
+  const snap = resolveBoundsSnapping(movingBounds, staticBounds, canvasBounds, threshold);
   return {
     transform: {
       ...updates,
