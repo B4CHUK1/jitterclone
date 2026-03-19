@@ -5,22 +5,10 @@ import useEditorStore from '../../store/editorStore'
 import useSceneStore from '../../store/sceneStore'
 import CanvasElement from './CanvasElement'
 import CanvasBackground from './CanvasBackground'
+import { CURSOR_ROTATE } from '../../cursors'
 
 const CANVAS_W = 1280
 const CANVAS_H = 720
-
-// Rotation cursor — quarter-circle arrow with outline for visibility on any bg
-const ROTATE_CURSOR = (() => {
-  const svg = encodeURIComponent(
-    `<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'>` +
-    `<path d='M10 2A8 8 0 0 0 2 10' stroke='black' stroke-width='3.5' fill='none' stroke-linecap='round'/>` +
-    `<path d='M2 6L2 10L6 10' stroke='black' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/>` +
-    `<path d='M10 2A8 8 0 0 0 2 10' stroke='white' stroke-width='1.5' fill='none' stroke-linecap='round'/>` +
-    `<path d='M2 6L2 10L6 10' stroke='white' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/>` +
-    `</svg>`,
-  )
-  return `url("data:image/svg+xml,${svg}") 10 10, crosshair`
-})()
 
 // Compute the 4 corners of an element in screen-space.
 // Also returns the center (average of corners = rotated element's center).
@@ -235,6 +223,7 @@ export default function Canvas() {
         width={stageDims.w}
         height={stageDims.h}
         draggable
+        style={{ cursor: 'default' }}
         onWheel={handleWheel}
         onClick={handleStageClick}
         onTap={handleStageClick}
@@ -265,7 +254,7 @@ export default function Canvas() {
             top:  y,
             width: 20,
             height: 20,
-            cursor: ROTATE_CURSOR,
+            cursor: CURSOR_ROTATE[i],
             zIndex: 10,
             // Uncomment to debug zone positions:
             // background: 'rgba(232,255,0,0.15)',

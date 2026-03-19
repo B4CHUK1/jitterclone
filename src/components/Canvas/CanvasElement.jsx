@@ -3,6 +3,7 @@ import { useRef, useEffect } from 'react'
 import { Image, Transformer } from 'react-konva'
 import useImage from 'use-image'
 import useSceneStore from '../../store/sceneStore'
+import { CURSOR_MOVE, CURSOR_GRABBING } from '../../cursors'
 
 function getCoverCrop(image, width, height) {
   const imgRatio = image.width / image.height
@@ -133,7 +134,19 @@ export default function CanvasElement({ element, isSelected, onSelect, onRegiste
         draggable
         onClick={onSelect}
         onTap={onSelect}
-        onDragEnd={handleDragEnd}
+        onDragEnd={(e) => {
+          handleDragEnd(e)
+          e.target.getStage().container().style.cursor = CURSOR_MOVE
+        }}
+        onDragStart={(e) => {
+          e.target.getStage().container().style.cursor = CURSOR_GRABBING
+        }}
+        onMouseEnter={(e) => {
+          e.target.getStage().container().style.cursor = CURSOR_MOVE
+        }}
+        onMouseLeave={(e) => {
+          e.target.getStage().container().style.cursor = 'default'
+        }}
         onTransform={handleTransform}
         onTransformEnd={handleTransformEnd}
         perfectDrawEnabled={false}
@@ -143,12 +156,11 @@ export default function CanvasElement({ element, isSelected, onSelect, onRegiste
       {isSelected && (
         <Transformer
           ref={trRef}
-          // Wide invisible hit area on each anchor — makes entire edge draggable
-          anchorHitStrokeWidth={10}
-          // Custom per-anchor styling: corners visible, edges invisible
+          anchorHitStrokeWidth={12}
           anchorStyleFunc={(anchor) => {
-            const CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
-            const isCorner = CORNERS.some((name) => anchor.hasName(name))
+            const isCorner  = ['top-left', 'top-right', 'bottom-left', 'bottom-right'].some((n) => anchor.hasName(n))
+            const isEdge    = ['top-center', 'bottom-center', 'middle-left', 'middle-right'].some((n) => anchor.hasName(n))
+            const isRotater = anchor.hasName('.rotater')
 
             if (isCorner) {
               anchor.width(8)
@@ -159,19 +171,23 @@ export default function CanvasElement({ element, isSelected, onSelect, onRegiste
               anchor.stroke('#e8ff00')
               anchor.strokeWidth(1)
               anchor.cornerRadius(0)
-            } else if (anchor.hasName('rotater')) {
-              // Rotation handled by HTML overlay — hide Konva's built-in handle
-              anchor.width(0)
-              anchor.height(0)
-              anchor.fill('transparent')
-              anchor.stroke('transparent')
-            } else {
-              // Edge anchors (top-center, bottom-center, middle-left, middle-right)
-              // Visually invisible; hit area set by anchorHitStrokeWidth
-              anchor.width(0)
-              anchor.height(0)
-              anchor.fill('transparent')
-              anchor.stroke('transparent')
+              anchor.opacity(1)
+            } else if (isEdge) {
+              // NEVER width(0)/height(0) — destroys the hit area.
+              // opacity(0) = invisible but still clickable/draggable.
+              anchor.width(6)
+              anchor.height(6)
+              anchor.offsetX(3)
+              anchor.offsetY(3)
+              anchor.opacity(0)
+              anchor.strokeWidth(0)
+            } else if (isRotater) {
+              anchor.width(6)
+              anchor.height(6)
+              anchor.offsetX(3)
+              anchor.offsetY(3)
+              anchor.opacity(0)
+              anchor.strokeWidth(0)
             }
           }}
           borderStroke="#e8ff00"
