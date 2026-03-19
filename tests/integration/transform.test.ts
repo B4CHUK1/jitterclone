@@ -5,6 +5,8 @@ import { beginResize, updateResize } from '@/engine/interaction/resizeInteractio
 import { beginRotate, updateRotate } from '@/engine/interaction/rotateInteraction';
 import { vec2 } from '@/engine/transform/math';
 
+const NO_MOD = { shift: false, alt: false };
+
 describe('Drag interaction', () => {
   it('moves elements by delta', () => {
     const t = { ...defaultTransform(), x: 100, y: 100, width: 50, height: 50 };
@@ -39,40 +41,71 @@ describe('Resize interaction', () => {
   it('resizes from right edge', () => {
     const t = { ...defaultTransform(), x: 100, y: 100, width: 200, height: 100 };
     const state = beginResize('right', vec2(300, 150), 'a', t);
-    const result = updateResize(state, vec2(350, 150), false);
+    const result = updateResize(state, vec2(350, 150), NO_MOD);
     expect(result.width).toBe(250);
   });
 
   it('resizes from bottom edge', () => {
     const t = { ...defaultTransform(), x: 100, y: 100, width: 200, height: 100 };
     const state = beginResize('bottom', vec2(200, 200), 'a', t);
-    const result = updateResize(state, vec2(200, 280), false);
+    const result = updateResize(state, vec2(200, 280), NO_MOD);
     expect(result.height).toBe(180);
+  });
+
+  it('resizes from left edge (shifts position)', () => {
+    const t = { ...defaultTransform(), x: 100, y: 100, width: 200, height: 100 };
+    const state = beginResize('left', vec2(100, 150), 'a', t);
+    const result = updateResize(state, vec2(50, 150), NO_MOD);
+    expect(result.width).toBe(250);
+    expect(result.x).toBe(50);
+  });
+
+  it('resizes from top edge (shifts position)', () => {
+    const t = { ...defaultTransform(), x: 100, y: 100, width: 200, height: 100 };
+    const state = beginResize('top', vec2(200, 100), 'a', t);
+    const result = updateResize(state, vec2(200, 60), NO_MOD);
+    expect(result.height).toBe(140);
+    expect(result.y).toBe(60);
   });
 
   it('enforces minimum size', () => {
     const t = { ...defaultTransform(), x: 100, y: 100, width: 200, height: 100 };
     const state = beginResize('right', vec2(300, 150), 'a', t);
-    const result = updateResize(state, vec2(50, 150), false);
+    const result = updateResize(state, vec2(50, 150), NO_MOD);
     expect(result.width).toBeGreaterThanOrEqual(1);
   });
 
   it('preserves aspect ratio with shift', () => {
     const t = { ...defaultTransform(), x: 0, y: 0, width: 200, height: 100 };
     const state = beginResize('bottom-right', vec2(200, 100), 'a', t);
-    const result = updateResize(state, vec2(300, 100), true);
-    expect(result.width! / result.height!).toBeCloseTo(2); // 200/100 ratio
+    const result = updateResize(state, vec2(300, 100), { shift: true, alt: false });
+    expect(result.width! / result.height!).toBeCloseTo(2);
+  });
+
+  it('resizes from center with alt', () => {
+    const t = { ...defaultTransform(), x: 100, y: 100, width: 200, height: 100 };
+    const state = beginResize('right', vec2(300, 150), 'a', t);
+    const result = updateResize(state, vec2(350, 150), { shift: false, alt: true });
+    // Alt: delta is doubled, position shifts to keep center fixed
+    expect(result.width).toBe(300); // 200 + 50*2
+    expect(result.x).toBe(50);     // 100 - 50
+  });
+
+  it('resize from corner', () => {
+    const t = { ...defaultTransform(), x: 0, y: 0, width: 200, height: 100 };
+    const state = beginResize('bottom-right', vec2(200, 100), 'a', t);
+    const result = updateResize(state, vec2(250, 130), NO_MOD);
+    expect(result.width).toBe(250);
+    expect(result.height).toBe(130);
   });
 });
 
 describe('Rotate interaction', () => {
   it('rotates element', () => {
     const t = { ...defaultTransform(), x: 0, y: 0, width: 100, height: 100 };
-    const state = beginRotate(vec2(100, 50), 'a', t); // start from right edge
+    const state = beginRotate(vec2(100, 50), 'a', t);
 
-    // Move cursor to bottom
     const result = updateRotate(state, vec2(50, 100), false);
-    // Should have rotated roughly 90 degrees from right to bottom
     expect(Math.abs(result.rotation)).toBeGreaterThan(0);
   });
 
