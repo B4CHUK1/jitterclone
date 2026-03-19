@@ -4,8 +4,6 @@ import { Image, Transformer } from 'react-konva'
 import useImage from 'use-image'
 import useSceneStore from '../../store/sceneStore'
 
-// Compute Konva crop props to emulate object-fit: cover
-// Source: Konva official "Scale Image To Fit" pattern
 function getCoverCrop(image, width, height) {
   const imgRatio = image.width / image.height
   const boxRatio = width / height
@@ -26,7 +24,7 @@ function getCoverCrop(image, width, height) {
   return { x: cropX, y: cropY, width: cropW, height: cropH }
 }
 
-export default function CanvasElement({ element, isSelected, onSelect }) {
+export default function CanvasElement({ element, isSelected, onSelect, onRegisterRef }) {
   const imageRef = useRef(null)
   const trRef = useRef(null)
   const updateProperties = useSceneStore((s) => s.updateProperties)
@@ -43,8 +41,15 @@ export default function CanvasElement({ element, isSelected, onSelect }) {
 
   const [image] = useImage(src)
 
-  // Attach Transformer to the image node imperatively — the only reliable way
-  // in react-konva. Declarative attachment causes timing issues.
+  // Register the Konva image node with Canvas so it can drive the rotation overlay
+  useEffect(() => {
+    if (imageRef.current) {
+      onRegisterRef?.(id, imageRef.current)
+    }
+    return () => onRegisterRef?.(id, null)
+  }, [id, onRegisterRef])
+
+  // Attach Transformer to image node imperatively
   useEffect(() => {
     if (isSelected && trRef.current && imageRef.current) {
       trRef.current.nodes([imageRef.current])
@@ -52,32 +57,52 @@ export default function CanvasElement({ element, isSelected, onSelect }) {
     }
   }, [isSelected])
 
-  // Crop props based on fit mode
+  // Live cover crop during transform — no setState, pure Konva imperative
+  const handleTransform = () => {
+    const node = imageRef.current
+    if (!image || fit !== 'cover') return
+
+    const currentWidth  = node.width()  * node.scaleX()
+    const currentHeight = node.height() * node.scaleY()
+
+    const imgRatio = image.width / image.height
+    const boxRatio = currentWidth / currentHeight
+    let cropX, cropY, cropW, cropH
+
+    if (imgRatio > boxRatio) {
+      cropH = image.height
+      cropW = image.height * boxRatio
+      cropX = (image.width - cropW) / 2
+      cropY = 0
+    } else {
+      cropW = image.width
+      cropH = image.width / boxRatio
+      cropX = 0
+      cropY = (image.height - cropH) / 2
+    }
+
+    node.crop({ x: cropX, y: cropY, width: cropW, height: cropH })
+    node.getLayer()?.batchDraw()
+  }
+
+  // Crop props for initial / React-driven render
   const cropProps = {}
   if (image && fit === 'cover') {
     cropProps.crop = getCoverCrop(image, width, height)
   }
 
-  // Commit drag position to store
   const handleDragEnd = (e) => {
-    updateProperties(id, {
-      x: e.target.x(),
-      y: e.target.y(),
-    })
+    updateProperties(id, { x: e.target.x(), y: e.target.y() })
   }
 
-  // CRITICAL: Konva Transformer mutates scaleX/scaleY on the node, NOT width/height.
-  // We must bake the scale into absolute dimensions and reset scale to 1,
-  // otherwise subsequent transforms compound incorrectly.
+  // CRITICAL: bake scaleX/scaleY → width/height, reset scale to 1
   const handleTransformEnd = () => {
     const node = imageRef.current
-    const newScaleX = node.scaleX()
-    const newScaleY = node.scaleY()
+    const sx = node.scaleX()
+    const sy = node.scaleY()
+    const newWidth  = Math.max(20, node.width()  * sx)
+    const newHeight = Math.max(20, node.height() * sy)
 
-    const newWidth  = Math.max(20, node.width()  * newScaleX)
-    const newHeight = Math.max(20, node.height() * newScaleY)
-
-    // Reset scale on the Konva node immediately
     node.scaleX(1)
     node.scaleY(1)
 
@@ -109,6 +134,7 @@ export default function CanvasElement({ element, isSelected, onSelect }) {
         onClick={onSelect}
         onTap={onSelect}
         onDragEnd={handleDragEnd}
+        onTransform={handleTransform}
         onTransformEnd={handleTransformEnd}
         perfectDrawEnabled={false}
         {...cropProps}
@@ -117,16 +143,41 @@ export default function CanvasElement({ element, isSelected, onSelect }) {
       {isSelected && (
         <Transformer
           ref={trRef}
-          anchorSize={8}
-          anchorCornerRadius={0}
-          anchorStroke="#e8ff00"
-          anchorFill="#0a0a0a"
-          anchorStrokeWidth={1}
+          // Wide invisible hit area on each anchor — makes entire edge draggable
+          anchorHitStrokeWidth={10}
+          // Custom per-anchor styling: corners visible, edges invisible
+          anchorStyleFunc={(anchor) => {
+            const CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+            const isCorner = CORNERS.some((name) => anchor.hasName(name))
+
+            if (isCorner) {
+              anchor.width(8)
+              anchor.height(8)
+              anchor.offsetX(4)
+              anchor.offsetY(4)
+              anchor.fill('#0a0a0a')
+              anchor.stroke('#e8ff00')
+              anchor.strokeWidth(1)
+              anchor.cornerRadius(0)
+            } else if (anchor.hasName('rotater')) {
+              // Rotation handled by HTML overlay — hide Konva's built-in handle
+              anchor.width(0)
+              anchor.height(0)
+              anchor.fill('transparent')
+              anchor.stroke('transparent')
+            } else {
+              // Edge anchors (top-center, bottom-center, middle-left, middle-right)
+              // Visually invisible; hit area set by anchorHitStrokeWidth
+              anchor.width(0)
+              anchor.height(0)
+              anchor.fill('transparent')
+              anchor.stroke('transparent')
+            }
+          }}
           borderStroke="#e8ff00"
           borderStrokeWidth={1}
-          rotateAnchorOffset={24}
-          rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]}
-          rotationSnapTolerance={8}
+          // Rotation handled by overlay — disable Konva's built-in rotation
+          rotateEnabled={false}
           keepRatio={false}
           flipEnabled={false}
           boundBoxFunc={(oldBox, newBox) => {
