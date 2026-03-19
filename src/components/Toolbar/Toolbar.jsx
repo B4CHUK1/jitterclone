@@ -42,13 +42,11 @@ function Toolbar() {
           width  = height * ratio
         }
 
-        // Center on canvas
         const x = (CANVAS_W - width) / 2
         const y = (CANVAS_H - height) / 2
-
         const id = `el_${Date.now()}`
 
-        const element = {
+        addElement({
           id,
           type: 'image',
           src,
@@ -60,20 +58,19 @@ function Toolbar() {
             y:        { value: y,      keyframes: [] },
             width:    { value: width,  keyframes: [] },
             height:   { value: height, keyframes: [] },
-            opacity:  { value: 1,      keyframes: [] },
             rotation: { value: 0,      keyframes: [] },
-            scale:    { value: 1,      keyframes: [] },
+            opacity:  { value: 1,      keyframes: [] },
+            scaleX:   { value: 1,      keyframes: [] },
+            scaleY:   { value: 1,      keyframes: [] },
           },
-        }
-
-        addElement(element)
+        })
         select(id)
       }
       img.src = src
     }
     reader.readAsDataURL(file)
 
-    // Reset input so same file can be re-imported
+    // Reset so same file can be re-imported
     e.target.value = ''
   }
 
@@ -90,7 +87,6 @@ function Toolbar() {
         flexShrink: 0,
       }}
     >
-      {/* Logo / app name */}
       <span
         style={{
           fontFamily: "'JetBrains Mono', monospace",

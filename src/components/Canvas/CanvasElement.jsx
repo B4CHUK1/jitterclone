@@ -1,241 +1,140 @@
 // src/components/Canvas/CanvasElement.jsx
-import { useRef, useCallback } from 'react'
-import { useDrag } from '@use-gesture/react'
+import { useRef, useEffect } from 'react'
+import { Image, Transformer } from 'react-konva'
+import useImage from 'use-image'
 import useSceneStore from '../../store/sceneStore'
-import useEditorStore from '../../store/editorStore'
 
-const HANDLE_SIZE = 8
+// Compute Konva crop props to emulate object-fit: cover
+// Source: Konva official "Scale Image To Fit" pattern
+function getCoverCrop(image, width, height) {
+  const imgRatio = image.width / image.height
+  const boxRatio = width / height
+  let cropW, cropH, cropX, cropY
 
-const HANDLES = [
-  { id: 'nw', top: 0,   left: 0,   cursor: 'nw-resize' },
-  { id: 'n',  top: 0,   left: 50,  cursor: 'n-resize'  },
-  { id: 'ne', top: 0,   left: 100, cursor: 'ne-resize' },
-  { id: 'e',  top: 50,  left: 100, cursor: 'e-resize'  },
-  { id: 'se', top: 100, left: 100, cursor: 'se-resize' },
-  { id: 's',  top: 100, left: 50,  cursor: 's-resize'  },
-  { id: 'sw', top: 100, left: 0,   cursor: 'sw-resize' },
-  { id: 'w',  top: 50,  left: 0,   cursor: 'w-resize'  },
-]
-
-function applyHandleDelta(handleId, initial, dx, dy) {
-  let { x, y, width, height } = initial
-  const MIN = 20
-
-  switch (handleId) {
-    case 'se':
-      width  = Math.max(MIN, initial.width  + dx)
-      height = Math.max(MIN, initial.height + dy)
-      break
-    case 'sw':
-      width  = Math.max(MIN, initial.width  - dx)
-      x      = initial.x + Math.min(dx, initial.width  - MIN)
-      height = Math.max(MIN, initial.height + dy)
-      break
-    case 'ne':
-      width  = Math.max(MIN, initial.width  + dx)
-      height = Math.max(MIN, initial.height - dy)
-      y      = initial.y + Math.min(dy, initial.height - MIN)
-      break
-    case 'nw':
-      width  = Math.max(MIN, initial.width  - dx)
-      x      = initial.x + Math.min(dx, initial.width  - MIN)
-      height = Math.max(MIN, initial.height - dy)
-      y      = initial.y + Math.min(dy, initial.height - MIN)
-      break
-    case 'e':
-      width  = Math.max(MIN, initial.width  + dx)
-      break
-    case 'w':
-      width  = Math.max(MIN, initial.width  - dx)
-      x      = initial.x + Math.min(dx, initial.width  - MIN)
-      break
-    case 's':
-      height = Math.max(MIN, initial.height + dy)
-      break
-    case 'n':
-      height = Math.max(MIN, initial.height - dy)
-      y      = initial.y + Math.min(dy, initial.height - MIN)
-      break
-    default:
-      break
+  if (imgRatio > boxRatio) {
+    cropH = image.height
+    cropW = image.height * boxRatio
+    cropX = (image.width - cropW) / 2
+    cropY = 0
+  } else {
+    cropW = image.width
+    cropH = image.width / boxRatio
+    cropX = 0
+    cropY = (image.height - cropH) / 2
   }
 
-  return { x, y, width, height }
+  return { x: cropX, y: cropY, width: cropW, height: cropH }
 }
 
-// Module-level component — stable hooks, one per handle instance
-function ResizeHandle({ handleId, cursor, posTop, posLeft, elementRef, currentState, totalZoom, elementId, updateProperties, buildTransform }) {
-  const initial = useRef(null)
-
-  const bindHandle = useDrag(({ first, movement: [mx, my], last }) => {
-    if (first) {
-      initial.current = { ...currentState.current }
-    }
-
-    const inv = 1 / totalZoom
-    const { x, y, width, height } = applyHandleDelta(
-      handleId,
-      initial.current,
-      mx * inv,
-      my * inv,
-    )
-
-    if (elementRef.current) {
-      elementRef.current.style.width = `${width}px`
-      elementRef.current.style.height = `${height}px`
-      elementRef.current.style.transform = buildTransform(x, y, initial.current.rotation, initial.current.scale)
-    }
-
-    if (last) {
-      updateProperties(elementId, { x, y, width, height })
-    }
-  }, { filterTaps: true })
-
-  // Merge gesture handler with stopPropagation so the element's drag doesn't also start
-  const gestureHandlers = bindHandle()
-
-  return (
-    <div
-      {...gestureHandlers}
-      onPointerDown={(e) => {
-        e.stopPropagation()
-        gestureHandlers.onPointerDown?.(e)
-      }}
-      style={{
-        position: 'absolute',
-        top: `${posTop}%`,
-        left: `${posLeft}%`,
-        transform: 'translate(-50%, -50%)',
-        width: `${HANDLE_SIZE}px`,
-        height: `${HANDLE_SIZE}px`,
-        background: '#0a0a0a',
-        border: '1px solid #e8ff00',
-        cursor,
-        zIndex: 10,
-        touchAction: 'none',
-        flexShrink: 0,
-      }}
-    />
-  )
-}
-
-function CanvasElement({ element, isSelected, totalZoom }) {
-  const ref = useRef(null)
+export default function CanvasElement({ element, isSelected, onSelect }) {
+  const imageRef = useRef(null)
+  const trRef = useRef(null)
   const updateProperties = useSceneStore((s) => s.updateProperties)
-  const select = useEditorStore((s) => s.select)
 
-  const { id, src, naturalWidth, naturalHeight, fit = 'contain', properties } = element
+  const { id, src, fit = 'contain', properties } = element
   const x        = properties.x.value
   const y        = properties.y.value
   const width    = properties.width.value
   const height   = properties.height.value
-  const opacity  = properties.opacity.value
   const rotation = properties.rotation.value
-  const scale    = properties.scale.value
+  const opacity  = properties.opacity.value
+  const scaleX   = properties.scaleX.value
+  const scaleY   = properties.scaleY.value
 
-  // Always-current snapshot — handles capture this on drag start
-  const currentState = useRef({ x, y, width, height, rotation, scale })
-  currentState.current = { x, y, width, height, rotation, scale }
+  const [image] = useImage(src)
 
-  const dragStart = useRef({ x: 0, y: 0 })
+  // Attach Transformer to the image node imperatively — the only reliable way
+  // in react-konva. Declarative attachment causes timing issues.
+  useEffect(() => {
+    if (isSelected && trRef.current && imageRef.current) {
+      trRef.current.nodes([imageRef.current])
+      trRef.current.getLayer()?.batchDraw()
+    }
+  }, [isSelected])
 
-  const buildTransform = useCallback((px, py, rot, sc) => {
-    return `translate(${px}px, ${py}px) rotate(${rot}deg) scale(${sc})`
-  }, [])
+  // Crop props based on fit mode
+  const cropProps = {}
+  if (image && fit === 'cover') {
+    cropProps.crop = getCoverCrop(image, width, height)
+  }
 
-  // DO NOT override onPointerDown after spreading bind() — that breaks the gesture.
-  // The canvas background uses e.target === e.currentTarget for deselect, so no
-  // explicit stopPropagation is needed here.
-  const bind = useDrag(
-    ({ first, movement: [mx, my], last, event }) => {
-      event.stopPropagation()
+  // Commit drag position to store
+  const handleDragEnd = (e) => {
+    updateProperties(id, {
+      x: e.target.x(),
+      y: e.target.y(),
+    })
+  }
 
-      if (first) {
-        dragStart.current = { x, y }
-        select(id)
-      }
+  // CRITICAL: Konva Transformer mutates scaleX/scaleY on the node, NOT width/height.
+  // We must bake the scale into absolute dimensions and reset scale to 1,
+  // otherwise subsequent transforms compound incorrectly.
+  const handleTransformEnd = () => {
+    const node = imageRef.current
+    const newScaleX = node.scaleX()
+    const newScaleY = node.scaleY()
 
-      const inv = 1 / totalZoom
-      const newX = dragStart.current.x + mx * inv
-      const newY = dragStart.current.y + my * inv
+    const newWidth  = Math.max(20, node.width()  * newScaleX)
+    const newHeight = Math.max(20, node.height() * newScaleY)
 
-      if (ref.current) {
-        ref.current.style.transform = buildTransform(newX, newY, rotation, scale)
-      }
+    // Reset scale on the Konva node immediately
+    node.scaleX(1)
+    node.scaleY(1)
 
-      if (last) {
-        updateProperties(id, { x: newX, y: newY })
-      }
-    },
-    { filterTaps: true },
-  )
-
-  // Image rendering based on fit mode
-  const imgStyle = {
-    display: 'block',
-    pointerEvents: 'none',
-    objectPosition: 'center',
-    ...(fit === 'crop'
-      ? { width: `${naturalWidth}px`, height: `${naturalHeight}px`, objectFit: 'none' }
-      : { width: '100%', height: '100%', objectFit: fit }),
+    updateProperties(id, {
+      x:        node.x(),
+      y:        node.y(),
+      width:    newWidth,
+      height:   newHeight,
+      rotation: node.rotation(),
+      scaleX:   1,
+      scaleY:   1,
+    })
   }
 
   return (
-    <div
-      ref={ref}
-      {...bind()}
-      onClick={(e) => {
-        e.stopPropagation()
-        select(id)
-      }}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: `${width}px`,
-        height: `${height}px`,
-        transform: buildTransform(x, y, rotation, scale),
-        opacity,
-        outline: isSelected ? '1px solid #e8ff00' : 'none',
-        cursor: 'grab',
-        userSelect: 'none',
-        touchAction: 'none',
-      }}
-    >
-      {/* Inner wrapper handles overflow:hidden for crop mode */}
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          overflow: fit === 'crop' ? 'hidden' : 'visible',
-          position: 'relative',
-        }}
-      >
-        <img
-          src={src}
-          alt=""
-          style={imgStyle}
-          draggable={false}
-        />
-      </div>
+    <>
+      <Image
+        ref={imageRef}
+        image={image}
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rotation={rotation}
+        opacity={opacity}
+        scaleX={scaleX}
+        scaleY={scaleY}
+        draggable
+        onClick={onSelect}
+        onTap={onSelect}
+        onDragEnd={handleDragEnd}
+        onTransformEnd={handleTransformEnd}
+        perfectDrawEnabled={false}
+        {...cropProps}
+      />
 
-      {isSelected && HANDLES.map((h) => (
-        <ResizeHandle
-          key={h.id}
-          handleId={h.id}
-          cursor={h.cursor}
-          posTop={h.top}
-          posLeft={h.left}
-          elementRef={ref}
-          currentState={currentState}
-          totalZoom={totalZoom}
-          elementId={id}
-          updateProperties={updateProperties}
-          buildTransform={buildTransform}
+      {isSelected && (
+        <Transformer
+          ref={trRef}
+          anchorSize={8}
+          anchorCornerRadius={0}
+          anchorStroke="#e8ff00"
+          anchorFill="#0a0a0a"
+          anchorStrokeWidth={1}
+          borderStroke="#e8ff00"
+          borderStrokeWidth={1}
+          rotateAnchorOffset={24}
+          rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]}
+          rotationSnapTolerance={8}
+          keepRatio={false}
+          flipEnabled={false}
+          boundBoxFunc={(oldBox, newBox) => {
+            if (newBox.width < 20 || newBox.height < 20) return oldBox
+            return newBox
+          }}
         />
-      ))}
-    </div>
+      )}
+    </>
   )
 }
-
-export default CanvasElement

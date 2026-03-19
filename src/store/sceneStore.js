@@ -3,26 +3,27 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 
 const useSceneStore = create(immer((set) => ({
-  duration: 3000, // ms
+  duration: 3000,
   elements: [],
-  // [
-  //   {
-  //     id: "el_1",
-  //     type: "image",
-  //     src: "data:image/...",   // base64
-  //     naturalWidth: 1200,
-  //     naturalHeight: 800,
-  //     properties: {
-  //       x:        { value: 100, keyframes: [] },
-  //       y:        { value: 80,  keyframes: [] },
-  //       width:    { value: 400, keyframes: [] },
-  //       height:   { value: 266, keyframes: [] },
-  //       opacity:  { value: 1,   keyframes: [] },
-  //       rotation: { value: 0,   keyframes: [] },
-  //       scale:    { value: 1,   keyframes: [] },
-  //     }
+  // Shape d'un élément :
+  // {
+  //   id: 'el_1',
+  //   type: 'image',
+  //   src: 'data:image/...',        // base64
+  //   naturalWidth: 1200,
+  //   naturalHeight: 800,
+  //   fit: 'contain',              // 'contain' | 'cover' | 'none'
+  //   properties: {
+  //     x:        { value: 100, keyframes: [] },
+  //     y:        { value: 80,  keyframes: [] },
+  //     width:    { value: 400, keyframes: [] },
+  //     height:   { value: 266, keyframes: [] },
+  //     rotation: { value: 0,   keyframes: [] }, // degrés
+  //     opacity:  { value: 1,   keyframes: [] }, // 0–1
+  //     scaleX:   { value: 1,   keyframes: [] }, // géré par Konva Transformer
+  //     scaleY:   { value: 1,   keyframes: [] },
   //   }
-  // ]
+  // }
 
   addElement: (element) => set((state) => {
     state.elements.push(element)

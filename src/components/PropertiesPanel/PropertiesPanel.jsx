@@ -2,7 +2,8 @@
 import useSceneStore from '../../store/sceneStore'
 import useEditorStore from '../../store/editorStore'
 
-const FIT_MODES = ['contain', 'cover', 'crop']
+// Fit mode changed from 'crop' → 'none' to match Konva crop API semantics
+const FIT_MODES = ['contain', 'cover', 'none']
 
 const labelStyle = {
   fontFamily: "'JetBrains Mono', monospace",
@@ -121,6 +122,22 @@ function PropertiesPanel() {
           />
         </div>
 
+        {/* Rotation */}
+        <div style={{ marginBottom: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+            <span style={labelStyle}>Rotation</span>
+            <span style={{ ...labelStyle, color: '#ffffff', marginBottom: 0 }}>{Math.round(properties.rotation.value)}°</span>
+          </div>
+          <input
+            type="range"
+            min={-180}
+            max={180}
+            value={properties.rotation.value}
+            onChange={(e) => set('rotation', parseInt(e.target.value, 10))}
+            className="prop-slider"
+          />
+        </div>
+
         {/* Fit mode */}
         <div style={{ marginBottom: '12px' }}>
           <span style={labelStyle}>Fit</span>
@@ -149,22 +166,6 @@ function PropertiesPanel() {
               )
             })}
           </div>
-        </div>
-
-        {/* Rotation */}
-        <div style={{ marginBottom: '12px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
-            <span style={labelStyle}>Rotation</span>
-            <span style={{ ...labelStyle, color: '#ffffff', marginBottom: 0 }}>{Math.round(properties.rotation.value)}°</span>
-          </div>
-          <input
-            type="range"
-            min={-180}
-            max={180}
-            value={properties.rotation.value}
-            onChange={(e) => set('rotation', parseInt(e.target.value, 10))}
-            className="prop-slider"
-          />
         </div>
       </div>
     </div>

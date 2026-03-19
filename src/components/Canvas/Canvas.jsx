@@ -1,167 +1,119 @@
 // src/components/Canvas/Canvas.jsx
-import { useRef, useEffect, useState, useCallback } from 'react'
-import { useDrag } from '@use-gesture/react'
-import useSceneStore from '../../store/sceneStore'
+import { useRef, useEffect, useState } from 'react'
+import { Stage, Layer } from 'react-konva'
 import useEditorStore from '../../store/editorStore'
+import useSceneStore from '../../store/sceneStore'
 import CanvasElement from './CanvasElement'
+import CanvasBackground from './CanvasBackground'
 
 const CANVAS_W = 1280
 const CANVAS_H = 720
 
-function Canvas() {
-  const elements = useSceneStore((s) => s.elements)
-  const selectedId = useEditorStore((s) => s.selectedId)
-  const deselect = useEditorStore((s) => s.deselect)
-  const zoom = useEditorStore((s) => s.zoom)
-  const panX = useEditorStore((s) => s.panX)
-  const panY = useEditorStore((s) => s.panY)
-  const setZoom = useEditorStore((s) => s.setZoom)
-  const setPan = useEditorStore((s) => s.setPan)
-  const resetView = useEditorStore((s) => s.resetView)
-
-  const [baseScale, setBaseScale] = useState(1)
-  const [spaceCursor, setSpaceCursor] = useState(false)
-
+export default function Canvas() {
+  const stageRef = useRef(null)
   const containerRef = useRef(null)
-  const spacePressed = useRef(false)
-  const panStartRef = useRef({ panX: 0, panY: 0 })
+  const [stageDims, setStageDims] = useState({ w: window.innerWidth, h: window.innerHeight })
 
-  // Fit-to-screen base scale via ResizeObserver
+  const { selectedId, select, deselect } = useEditorStore()
+  const elements = useSceneStore((s) => s.elements)
+
+  // Fit-to-screen: set Stage scale + position so canvas fills the container
   useEffect(() => {
-    function computeScale() {
-      if (!containerRef.current) return
-      const { clientWidth, clientHeight } = containerRef.current
-      const sx = (clientWidth - 64) / CANVAS_W
-      const sy = (clientHeight - 64) / CANVAS_H
-      setBaseScale(Math.min(sx, sy, 1))
+    const fitStage = () => {
+      if (!stageRef.current || !containerRef.current) return
+      const { offsetWidth: W, offsetHeight: H } = containerRef.current
+      setStageDims({ w: W, h: H })
+      const scale = Math.min(W / CANVAS_W, H / CANVAS_H) * 0.9
+      stageRef.current.scale({ x: scale, y: scale })
+      stageRef.current.position({
+        x: (W - CANVAS_W * scale) / 2,
+        y: (H - CANVAS_H * scale) / 2,
+      })
     }
-    computeScale()
-    const ro = new ResizeObserver(computeScale)
+
+    // Run after first paint so containerRef has dimensions
+    const raf = requestAnimationFrame(fitStage)
+    const ro = new ResizeObserver(fitStage)
     if (containerRef.current) ro.observe(containerRef.current)
-    return () => ro.disconnect()
-  }, [])
-
-  // Space key for pan cursor (state for re-render) + ref for drag logic (no re-render)
-  useEffect(() => {
-    function onKeyDown(e) {
-      if (e.code === 'Space' && !e.repeat) {
-        e.preventDefault()
-        spacePressed.current = true
-        setSpaceCursor(true)
-      }
-    }
-    function onKeyUp(e) {
-      if (e.code === 'Space') {
-        spacePressed.current = false
-        setSpaceCursor(false)
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('keyup', onKeyUp)
     return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('keyup', onKeyUp)
+      cancelAnimationFrame(raf)
+      ro.disconnect()
     }
   }, [])
 
-  // Wheel: non-passive so we can call preventDefault.
-  // ctrlKey === true signals pinch-to-zoom (trackpad) or Ctrl+wheel → ZOOM.
-  // No ctrlKey = two-finger scroll on trackpad → PAN.
-  const handleWheel = useCallback((e) => {
-    e.preventDefault()
+  // Wheel — zoom centered on cursor (Konva official pattern)
+  // ctrlKey === true: pinch trackpad or Ctrl+wheel → zoom
+  // ctrlKey === false: two-finger trackpad scroll → pan
+  const handleWheel = (e) => {
+    e.evt.preventDefault()
+    const stage = stageRef.current
+    const oldScale = stage.scaleX()
+    const pointer = stage.getPointerPosition()
 
-    const { zoom: curZoom, panX: curPanX, panY: curPanY } = useEditorStore.getState()
-
-    if (e.ctrlKey) {
-      // ZOOM — centered on mouse cursor position
-      const factor = e.deltaY > 0 ? 0.92 : 1.08
-      const newZoom = Math.min(Math.max(curZoom * factor, 0.1), 4)
-
-      const rect = containerRef.current.getBoundingClientRect()
-      const mouseX = e.clientX - rect.left - rect.width  / 2
-      const mouseY = e.clientY - rect.top  - rect.height / 2
-      const scaleFactor = newZoom / curZoom
-      const newPanX = mouseX - scaleFactor * (mouseX - curPanX)
-      const newPanY = mouseY - scaleFactor * (mouseY - curPanY)
-
-      setZoom(newZoom)
-      setPan(newPanX, newPanY)
+    if (e.evt.ctrlKey) {
+      // ZOOM
+      const mousePointTo = {
+        x: (pointer.x - stage.x()) / oldScale,
+        y: (pointer.y - stage.y()) / oldScale,
+      }
+      // Invert direction for ctrlKey (pinch-to-zoom sends inverted deltaY)
+      const direction = e.evt.deltaY > 0 ? -1 : 1
+      const scaleBy = 1.06
+      const newScale = Math.min(
+        Math.max(direction > 0 ? oldScale * scaleBy : oldScale / scaleBy, 0.05),
+        8,
+      )
+      stage.scale({ x: newScale, y: newScale })
+      stage.position({
+        x: pointer.x - mousePointTo.x * newScale,
+        y: pointer.y - mousePointTo.y * newScale,
+      })
     } else {
       // PAN — two-finger trackpad scroll
-      setPan(curPanX - e.deltaX, curPanY - e.deltaY)
+      stage.position({
+        x: stage.x() - e.evt.deltaX,
+        y: stage.y() - e.evt.deltaY,
+      })
     }
-  }, [setZoom, setPan])
+  }
 
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    el.addEventListener('wheel', handleWheel, { passive: false })
-    return () => el.removeEventListener('wheel', handleWheel)
-  }, [handleWheel])
-
-  // Pan via Space + drag
-  const panBind = useDrag(({ first, movement: [mx, my] }) => {
-    if (!spacePressed.current) return
-    if (first) {
-      const s = useEditorStore.getState()
-      panStartRef.current = { panX: s.panX, panY: s.panY }
+  // Deselect when clicking directly on Stage (not on any shape)
+  const handleStageClick = (e) => {
+    if (e.target === e.target.getStage()) {
+      deselect()
     }
-    setPan(panStartRef.current.panX + mx, panStartRef.current.panY + my)
-  })
-
-  const totalZoom = baseScale * zoom
+  }
 
   return (
     <div
       ref={containerRef}
-      {...panBind()}
-      style={{
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#0a0a0a',
-        overflow: 'hidden',
-        cursor: spaceCursor ? 'grab' : 'default',
-      }}
-      onClick={deselect}
+      style={{ flex: 1, overflow: 'hidden', background: '#0a0a0a' }}
     >
-      {/* Pan + zoom wrapper */}
-      <div
-        style={{
-          transform: `translate(${panX}px, ${panY}px) scale(${totalZoom})`,
-          transformOrigin: 'center center',
-          flexShrink: 0,
-        }}
+      <Stage
+        ref={stageRef}
+        width={stageDims.w}
+        height={stageDims.h}
+        draggable
+        onWheel={handleWheel}
+        onClick={handleStageClick}
+        onTap={handleStageClick}
       >
-        {/* Canvas surface — 1280×720 */}
-        <div
-          style={{
-            position: 'relative',
-            width: `${CANVAS_W}px`,
-            height: `${CANVAS_H}px`,
-            background: '#111111',
-            overflow: 'hidden',
-          }}
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) deselect()
-          }}
-          onDoubleClick={(e) => {
-            if (e.target === e.currentTarget) resetView()
-          }}
-        >
+        <Layer>
+          <CanvasBackground
+            width={CANVAS_W}
+            height={CANVAS_H}
+            onDeselect={deselect}
+          />
           {elements.map((el) => (
             <CanvasElement
               key={el.id}
               element={el}
               isSelected={selectedId === el.id}
-              totalZoom={totalZoom}
+              onSelect={() => select(el.id)}
             />
           ))}
-        </div>
-      </div>
+        </Layer>
+      </Stage>
     </div>
   )
 }
-
-export default Canvas
