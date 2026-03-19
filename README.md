@@ -1,16 +1,47 @@
-# React + Vite
+# Jitter
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A 2D motion design tool for the browser, built with React, PixiJS, and TypeScript.
 
-Currently, two official plugins are available:
+## Quick Start
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+pnpm install
+pnpm dev
+```
 
-## React Compiler
+## Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **React 19** — UI framework
+- **PixiJS 8** — 2D rendering engine
+- **Zustand** — State management
+- **TypeScript** — Strict mode
+- **Vite** — Build tool
+- **Vitest** — Unit & integration tests
+- **CSS Modules** — Scoped styling
 
-## Expanding the ESLint configuration
+## Architecture
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full architecture overview.
+
+## Scripts
+
+| Command | Description |
+|---------|-------------|
+| `pnpm dev` | Start dev server |
+| `pnpm build` | Type-check + production build |
+| `pnpm test` | Run all tests |
+| `pnpm test:watch` | Run tests in watch mode |
+| `pnpm lint` | Lint source code |
+| `pnpm format` | Format source code |
+
+## Current Features (Bloc A)
+
+- Canvas with PixiJS rendering
+- Viewport pan (scroll/drag) and zoom (Ctrl+scroll, centered on cursor)
+- Shape creation (rectangle, ellipse)
+- Single select, multi-select, marquee select
+- Move, resize (8 handles), rotate (4 corner handles)
+- Anchor point system
+- Nested coordinate system with world matrices
+- Properties panel for transform and style editing
+- Keyboard shortcuts (V/R/O/H tools, Delete, Escape)

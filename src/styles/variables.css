@@ -1,0 +1,43 @@
+:root {
+  /* Colors */
+  --color-bg-primary: #0a0a0f;
+  --color-bg-secondary: #141418;
+  --color-bg-tertiary: #1e1e24;
+  --color-bg-surface: #252530;
+
+  --color-text-primary: #e8e8ec;
+  --color-text-secondary: #9898a0;
+  --color-text-muted: #58586a;
+
+  --color-accent: #e8ff00;
+  --color-accent-dim: rgba(232, 255, 0, 0.3);
+  --color-selection: #4a90d9;
+  --color-selection-dim: rgba(74, 144, 217, 0.2);
+
+  --color-border: #2a2a35;
+  --color-border-active: #4a4a55;
+
+  --color-canvas-bg: #0d0d12;
+  --color-artboard: #1a1a2e;
+
+  --color-handle-fill: #ffffff;
+  --color-handle-stroke: var(--color-selection);
+  --color-marquee-fill: rgba(74, 144, 217, 0.1);
+  --color-marquee-stroke: var(--color-selection);
+
+  /* Sizes */
+  --toolbar-height: 40px;
+  --panel-width: 240px;
+  --handle-size: 8px;
+
+  /* Fonts */
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Z-indices */
+  --z-canvas: 0;
+  --z-overlay: 10;
+  --z-toolbar: 20;
+  --z-panel: 20;
+  --z-modal: 30;
+}

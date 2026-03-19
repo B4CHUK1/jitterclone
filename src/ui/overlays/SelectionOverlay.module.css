@@ -1,0 +1,42 @@
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: var(--z-overlay);
+}
+
+.handle {
+  position: absolute;
+  width: var(--handle-size);
+  height: var(--handle-size);
+  background: var(--color-handle-fill);
+  border: 1.5px solid var(--color-handle-stroke);
+  border-radius: 1px;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+}
+
+.edgeHandle {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.rotationHandle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  border-radius: 50%;
+}
+
+.marquee {
+  position: absolute;
+  border: 1px solid var(--color-marquee-stroke);
+  background: var(--color-marquee-fill);
+  pointer-events: none;
+}
