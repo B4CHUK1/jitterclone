@@ -1,0 +1,46 @@
+// src/store/sceneStore.js
+import { create } from 'zustand'
+import { immer } from 'zustand/middleware/immer'
+
+const useSceneStore = create(immer((set) => ({
+  duration: 3000, // ms
+  elements: [],
+  // [
+  //   {
+  //     id: "el_1",
+  //     type: "image",
+  //     src: "data:image/...",   // base64
+  //     naturalWidth: 1200,
+  //     naturalHeight: 800,
+  //     properties: {
+  //       x:        { value: 100, keyframes: [] },
+  //       y:        { value: 80,  keyframes: [] },
+  //       width:    { value: 400, keyframes: [] },
+  //       height:   { value: 266, keyframes: [] },
+  //       opacity:  { value: 1,   keyframes: [] },
+  //       rotation: { value: 0,   keyframes: [] },
+  //       scale:    { value: 1,   keyframes: [] },
+  //     }
+  //   }
+  // ]
+
+  addElement: (element) => set((state) => {
+    state.elements.push(element)
+  }),
+
+  updateProperty: (id, prop, value) => set((state) => {
+    const el = state.elements.find(e => e.id === id)
+    if (el) el.properties[prop].value = value
+  }),
+
+  updateProperties: (id, updates) => set((state) => {
+    const el = state.elements.find(e => e.id === id)
+    if (el) {
+      Object.entries(updates).forEach(([prop, value]) => {
+        if (el.properties[prop]) el.properties[prop].value = value
+      })
+    }
+  }),
+})))
+
+export default useSceneStore
