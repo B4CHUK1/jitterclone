@@ -248,46 +248,50 @@ export default function Canvas() {
     const cos   = Math.cos(r)
     const sin   = Math.sin(r)
 
-    // Snapshot initial state
-    const initX      = node.x()
-    const initY      = node.y()
-    const initWidth  = node.width()
-    const initHeight = node.height()
-    let   lastClientX = e.clientX
-    let   lastClientY = e.clientY
+    // Snapshot initial state (absolute — avoids cumulative floating-point drift)
+    const init = {
+      x:      node.x(),
+      y:      node.y(),
+      width:  node.width(),
+      height: node.height(),
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+    }
 
     const onMove = (mv) => {
-      // Screen-space delta
-      const screenDx = mv.clientX - lastClientX
-      const screenDy = mv.clientY - lastClientY
-      lastClientX = mv.clientX
-      lastClientY = mv.clientY
+      // Delta from drag-start in canvas-space
+      const dx = (mv.clientX - init.mouseX) / scale
+      const dy = (mv.clientY - init.mouseY) / scale
 
-      // Project into the element's local (rotated) space
-      const localDx = (screenDx * cos + screenDy * sin) / scale
-      const localDy = (-screenDx * sin + screenDy * cos) / scale
+      // Unit vectors of the element's local axes in world-space
+      const axisH_x =  cos  // "right" direction
+      const axisH_y =  sin
+      const axisV_x = -sin  // "down" direction
+      const axisV_y =  cos
 
-      let newX      = node.x()
-      let newY      = node.y()
-      let newWidth  = node.width()
-      let newHeight = node.height()
+      // Project mouse delta onto each local axis
+      const localH = dx * axisH_x + dy * axisH_y
+      const localV = dx * axisV_x + dy * axisV_y
+
+      let newX      = init.x
+      let newY      = init.y
+      let newWidth  = init.width
+      let newHeight = init.height
 
       if (side === 'right') {
-        newWidth = Math.max(20, newWidth + localDx)
-      } else if (side === 'bottom') {
-        newHeight = Math.max(20, newHeight + localDy)
+        newWidth = Math.max(20, init.width + localH)
       } else if (side === 'left') {
-        const delta = Math.min(localDx, newWidth - 20)
-        newWidth  = newWidth - delta
-        // Move origin along the left edge direction (local X axis = cos, sin in world space)
-        newX = newX + delta * cos
-        newY = newY + delta * sin
+        newWidth = Math.max(20, init.width - localH)
+        const delta = init.width - newWidth
+        newX = init.x + delta * axisH_x
+        newY = init.y + delta * axisH_y
+      } else if (side === 'bottom') {
+        newHeight = Math.max(20, init.height + localV)
       } else if (side === 'top') {
-        const delta = Math.min(localDy, newHeight - 20)
-        newHeight = newHeight - delta
-        // Move origin along the top edge direction (local Y axis = -sin, cos in world space)
-        newX = newX - delta * sin
-        newY = newY + delta * cos
+        newHeight = Math.max(20, init.height - localV)
+        const delta = init.height - newHeight
+        newX = init.x + delta * axisV_x
+        newY = init.y + delta * axisV_y
       }
 
       node.x(newX)
