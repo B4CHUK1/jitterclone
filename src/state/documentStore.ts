@@ -214,8 +214,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       },
     };
 
-    // If the property is animated and auto-keyframe is on, insert/update keyframe at this time
-    if (propertyState.animated && autoKeyframe) {
+    // If the property is animated, always insert/update keyframe at this time
+    // (autoKeyframe only controls whether non-animated properties start animating)
+    if (propertyState.animated) {
       const localTime = clampKeyframeTime(globalToLocalTime(globalTime, node), node);
       nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: localTime, value, easing: 'linear' as const });
     }
