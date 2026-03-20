@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent, WheelEvent } from 'react';
-import type { AnimatableProperty, SceneNode } from '@/document/types';
+import type { AnimatableProperty, EasingPreset, SceneNode } from '@/document/types';
 import {
   evaluateNodeAtTime,
   hasKeyframeAtTime,
@@ -15,7 +15,6 @@ import {
   buildTimelineLayout,
   TIMELINE_LABEL_WIDTH,
   TIMELINE_RULER_HEIGHT,
-  TIMELINE_LAYER_HEIGHT,
   TIMELINE_ROW_GAP,
 } from './timelineLayout';
 import { createTimelineTimeScale } from './timelineMapping';
@@ -38,6 +37,7 @@ export function TimelinePanel() {
   const moveKeyframe = useDocumentStore((s) => s.moveKeyframe);
   const removeKeyframe = useDocumentStore((s) => s.removeKeyframe);
   const setKeyframe = useDocumentStore((s) => s.setKeyframe);
+  const setKeyframeEasing = useDocumentStore((s) => s.setKeyframeEasing);
   const updateTiming = useDocumentStore((s) => s.updateTiming);
   const updateComposition = useDocumentStore((s) => s.updateComposition);
   const reorderLayers = useDocumentStore((s) => s.reorderLayers);
@@ -50,7 +50,6 @@ export function TimelinePanel() {
   const toggleAutoKeyframe = useTimelineStore((s) => s.toggleAutoKeyframe);
   const timeScaleValue = useTimelineStore((s) => s.timeScale);
   const setTimeScale = useTimelineStore((s) => s.setTimeScale);
-  const scrollX = useTimelineStore((s) => s.scrollX);
   const setScrollX = useTimelineStore((s) => s.setScrollX);
   const selectedKeyframes = useTimelineStore((s) => s.selectedKeyframes);
   const setSelectedKeyframes = useTimelineStore((s) => s.setSelectedKeyframes);
@@ -264,7 +263,7 @@ export function TimelinePanel() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [clipboardKeys, currentTime, document.nodes, selectedKeyframes, setKeyframe, removeKeyframe, setSelectedKeyframes, updateComposition, workAreaStart, workAreaEnd]);
+  }, [clipboardKeys, currentTime, document.nodes, selectedKeyframes, setKeyframe, removeKeyframe, setSelectedKeyframes, updateComposition, workAreaStart, workAreaEnd, setKeyframeEasing]);
 
   // ── Ruler ticks ──
   const rulerTicks = useMemo(() => {
@@ -425,6 +424,27 @@ export function TimelinePanel() {
         <button type="button" className={styles.playButton} onClick={toggleAutoKeyframe}>
           {autoKeyframe ? 'Auto-Key ON' : 'Auto-Key OFF'}
         </button>
+        {selectedKeyframes.length > 0 && (
+          <select
+            className={styles.playButton}
+            value=""
+            onChange={(e) => {
+              const easing = e.target.value as EasingPreset;
+              if (!easing) return;
+              for (const sel of selectedKeyframes) {
+                setKeyframeEasing(sel.nodeId, sel.property, sel.time, easing);
+              }
+              e.target.value = '';
+            }}
+          >
+            <option value="" disabled>Easing...</option>
+            <option value="linear">Linear</option>
+            <option value="ease-in">Ease In</option>
+            <option value="ease-out">Ease Out</option>
+            <option value="ease-in-out">Ease In/Out</option>
+            <option value="hold">Hold (step)</option>
+          </select>
+        )}
         <div className={styles.timeReadout}>
           {currentTime.toFixed(2)}s · f{frame}
         </div>

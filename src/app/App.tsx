@@ -11,6 +11,8 @@ export function App() {
   const deselectAll = useEditorStore((s) => s.deselectAll);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const removeNode = useDocumentStore((s) => s.removeNode);
+  const undo = useDocumentStore((s) => s.undo);
+  const redo = useDocumentStore((s) => s.redo);
   const composition = useDocumentStore((s) => s.document.composition);
   const isPlaying = useTimelineStore((s) => s.isPlaying);
   const pause = useTimelineStore((s) => s.pause);
@@ -26,6 +28,19 @@ export function App() {
         return;
       }
 
+      // Undo/Redo
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        redo();
+        return;
+      }
+
       switch (e.key.toLowerCase()) {
         case 'v':
           setTool('select');
@@ -35,6 +50,12 @@ export function App() {
           break;
         case 'o':
           setTool('ellipse');
+          break;
+        case 'p':
+          setTool('polygon');
+          break;
+        case 'l':
+          setTool('line');
           break;
         case 'h':
           setTool('hand');
@@ -54,7 +75,7 @@ export function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setTool, deselectAll, selectedIds, removeNode]);
+  }, [setTool, deselectAll, selectedIds, removeNode, undo, redo]);
 
   useEffect(() => {
     if (!isPlaying) return;

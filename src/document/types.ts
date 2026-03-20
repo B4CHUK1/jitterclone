@@ -5,7 +5,7 @@
 
 import type { Transform } from '@/engine/transform';
 
-export type NodeType = 'rectangle' | 'ellipse' | 'group';
+export type NodeType = 'rectangle' | 'ellipse' | 'polygon' | 'star' | 'line' | 'group';
 
 export interface Fill {
   readonly color: string;
@@ -18,11 +18,72 @@ export interface Stroke {
   readonly opacity: number;
 }
 
+// ── Effects ──
+
+export interface DropShadowEffect {
+  readonly type: 'drop-shadow';
+  readonly offsetX: number;
+  readonly offsetY: number;
+  readonly blur: number;
+  readonly color: string;
+  readonly opacity: number;
+}
+
+export interface InnerShadowEffect {
+  readonly type: 'inner-shadow';
+  readonly offsetX: number;
+  readonly offsetY: number;
+  readonly blur: number;
+  readonly color: string;
+  readonly opacity: number;
+}
+
+export interface GaussianBlurEffect {
+  readonly type: 'blur';
+  readonly radius: number;
+}
+
+export interface BackgroundBlurEffect {
+  readonly type: 'background-blur';
+  readonly radius: number;
+}
+
+export type Effect = DropShadowEffect | InnerShadowEffect | GaussianBlurEffect | BackgroundBlurEffect;
+
+// ── Blend Modes ──
+
+export type BlendMode =
+  | 'normal'
+  | 'multiply'
+  | 'screen'
+  | 'overlay'
+  | 'darken'
+  | 'lighten'
+  | 'color-dodge'
+  | 'color-burn'
+  | 'hard-light'
+  | 'soft-light'
+  | 'difference'
+  | 'exclusion';
+
+// ── Shape-specific params ──
+
+export interface PolygonParams {
+  readonly sides: number; // 3-12
+}
+
+export interface StarParams {
+  readonly points: number; // 3-12
+  readonly innerRadius: number; // 0-1 ratio of outer radius
+}
+
 export interface NodeStyle {
   readonly fill: Fill;
   readonly stroke: Stroke | null;
   readonly opacity: number;
   readonly cornerRadius: number;
+  readonly effects: Effect[];
+  readonly blendMode: BlendMode;
 }
 
 export interface SceneNode {
@@ -36,6 +97,9 @@ export interface SceneNode {
   readonly visible: boolean;
   readonly locked: boolean;
   readonly animation: NodeAnimation;
+  /** Shape-specific parameters */
+  readonly polygon?: PolygonParams;
+  readonly star?: StarParams;
   /** Clip start time in seconds (global timeline). Layer is inactive before this. */
   readonly startTime: number;
   /** Clip end time in seconds (global timeline). Layer is inactive after this. */
@@ -55,17 +119,38 @@ export interface Composition {
 }
 
 export type AnimatableProperty = 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotation' | 'opacity';
-export type InterpolationMode = 'linear';
+
+// ── Easing System ──
+
+export type EasingPreset = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'hold' | 'custom';
+
+export interface CubicBezierEasing {
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+}
+
+/** Preset cubic-bezier values */
+export const EASING_PRESETS: Record<Exclude<EasingPreset, 'hold' | 'custom'>, CubicBezierEasing> = {
+  'linear': { x1: 0, y1: 0, x2: 1, y2: 1 },
+  'ease-in': { x1: 0.42, y1: 0, x2: 1, y2: 1 },
+  'ease-out': { x1: 0, y1: 0, x2: 0.58, y2: 1 },
+  'ease-in-out': { x1: 0.42, y1: 0, x2: 0.58, y2: 1 },
+};
 
 export interface Keyframe {
   readonly time: number;
   readonly value: number;
+  /** Easing applied from this keyframe to the next. Default: 'linear' */
+  readonly easing: EasingPreset;
+  /** Custom cubic-bezier control points (only used when easing is 'custom') */
+  readonly bezier?: CubicBezierEasing;
 }
 
 export interface AnimatedProperty {
   readonly animated: boolean;
   readonly keyframes: Keyframe[];
-  readonly interpolation: InterpolationMode;
 }
 
 export type AnimationTrack = Record<AnimatableProperty, AnimatedProperty>;
@@ -98,6 +183,8 @@ export function defaultStyle(): NodeStyle {
     stroke: defaultStroke(),
     opacity: 1,
     cornerRadius: 0,
+    effects: [],
+    blendMode: 'normal',
   };
 }
 
@@ -132,12 +219,12 @@ export function createDocument(name: string, width = 1920, height = 1080): Docum
 export function defaultNodeAnimation(): NodeAnimation {
   return {
     properties: {
-      x: { animated: false, keyframes: [], interpolation: 'linear' },
-      y: { animated: false, keyframes: [], interpolation: 'linear' },
-      scaleX: { animated: false, keyframes: [], interpolation: 'linear' },
-      scaleY: { animated: false, keyframes: [], interpolation: 'linear' },
-      rotation: { animated: false, keyframes: [], interpolation: 'linear' },
-      opacity: { animated: false, keyframes: [], interpolation: 'linear' },
+      x: { animated: false, keyframes: [] },
+      y: { animated: false, keyframes: [] },
+      scaleX: { animated: false, keyframes: [] },
+      scaleY: { animated: false, keyframes: [] },
+      rotation: { animated: false, keyframes: [] },
+      opacity: { animated: false, keyframes: [] },
     },
   };
 }
