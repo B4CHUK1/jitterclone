@@ -3,6 +3,9 @@
   flex: 1;
   overflow: hidden;
   background: var(--color-canvas-bg);
+  /* Prevent text selection during canvas interactions */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .canvas {

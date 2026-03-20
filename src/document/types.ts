@@ -71,6 +71,12 @@ export type BlendMode =
 export interface PathPoint {
   readonly x: number;
   readonly y: number;
+  /** Incoming Bézier control handle offset (relative to point) */
+  readonly handleInX?: number;
+  readonly handleInY?: number;
+  /** Outgoing Bézier control handle offset (relative to point) */
+  readonly handleOutX?: number;
+  readonly handleOutY?: number;
 }
 
 export interface PolygonParams {
@@ -107,6 +113,8 @@ export interface SceneNode {
   readonly star?: StarParams;
   /** Free-draw path points (for 'path' type) */
   readonly pathData?: PathPoint[];
+  /** Whether the path is closed (forms a shape) */
+  readonly pathClosed?: boolean;
   /** Clip start time in seconds (global timeline). Layer is inactive before this. */
   readonly startTime: number;
   /** Clip end time in seconds (global timeline). Layer is inactive after this. */

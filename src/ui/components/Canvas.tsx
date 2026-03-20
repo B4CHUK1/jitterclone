@@ -91,13 +91,24 @@ export function Canvas() {
   const [, setRenderTick] = useState(0);
   const tick = useCallback(() => setRenderTick((t) => t + 1), []);
 
-  // Pen tool state
-  const penPointsRef = useRef<{ x: number; y: number }[]>([]);
+  // Pen tool state — each point can have Bézier handles
+  interface PenPoint {
+    x: number;
+    y: number;
+    handleInX: number;
+    handleInY: number;
+    handleOutX: number;
+    handleOutY: number;
+  }
+  const penPointsRef = useRef<PenPoint[]>([]);
   const penActiveRef = useRef(false);
   const penLastClickTimeRef = useRef(0);
+  const penDraggingHandleRef = useRef(false);
+  const penClosedRef = useRef(false);
   const [penPreview, setPenPreview] = useState<{
-    points: { x: number; y: number }[];
+    points: PenPoint[];
     cursor: { x: number; y: number } | null;
+    draggingHandle: boolean;
   } | null>(null);
 
   const doc = useDocumentStore((s) => s.document);
@@ -291,27 +302,49 @@ export function Canvas() {
   );
 
   // ── Finalize pen path: create node from accumulated anchor points ──
-  const finalizePenPath = useCallback(() => {
+  const finalizePenPath = useCallback((closed: boolean = false) => {
     const points = penPointsRef.current;
+    const isClosed = closed || penClosedRef.current;
     penActiveRef.current = false;
     penPointsRef.current = [];
+    penDraggingHandleRef.current = false;
+    penClosedRef.current = false;
     setPenPreview(null);
     setInteractionCursor(null);
     penLastClickTimeRef.current = 0;
 
     if (points.length >= 2) {
+      // Calculate bounding box including handle positions for accurate sizing
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const p of points) {
+        // Include the point itself
         if (p.x < minX) minX = p.x;
         if (p.y < minY) minY = p.y;
         if (p.x > maxX) maxX = p.x;
         if (p.y > maxY) maxY = p.y;
+        // Include handle positions for accurate bounds
+        const hox = p.x + p.handleOutX;
+        const hoy = p.y + p.handleOutY;
+        const hix = p.x + p.handleInX;
+        const hiy = p.y + p.handleInY;
+        if (hox < minX) minX = hox;
+        if (hoy < minY) minY = hoy;
+        if (hox > maxX) maxX = hox;
+        if (hoy > maxY) maxY = hoy;
+        if (hix < minX) minX = hix;
+        if (hiy < minY) minY = hiy;
+        if (hix > maxX) maxX = hix;
+        if (hiy > maxY) maxY = hiy;
       }
       const w = Math.max(1, maxX - minX);
       const h = Math.max(1, maxY - minY);
-      const normalizedPoints = points.map((p) => ({
+      const normalizedPoints: import('@/document/types').PathPoint[] = points.map((p) => ({
         x: (p.x - minX) / w,
         y: (p.y - minY) / h,
+        handleInX: p.handleInX / w || undefined,
+        handleInY: p.handleInY / h || undefined,
+        handleOutX: p.handleOutX / w || undefined,
+        handleOutY: p.handleOutY / h || undefined,
       }));
       const id = addNode('path', {
         transform: {
@@ -322,8 +355,9 @@ export function Canvas() {
           height: h,
         },
         pathData: normalizedPoints,
+        pathClosed: isClosed,
         style: {
-          fill: { color: '#5B8DEF', opacity: 1 },
+          fill: { color: '#5B8DEF', opacity: isClosed ? 1 : 0 },
           stroke: { color: '#5B8DEF', width: 2, opacity: 1 },
           opacity: 1,
           cornerRadius: 0,
@@ -342,12 +376,14 @@ export function Canvas() {
       if (e.key === 'Escape' && penActiveRef.current) {
         penActiveRef.current = false;
         penPointsRef.current = [];
+        penDraggingHandleRef.current = false;
+        penClosedRef.current = false;
         setPenPreview(null);
         setInteractionCursor(null);
         setTool('select');
       }
       if (e.key === 'Enter' && penActiveRef.current) {
-        finalizePenPath();
+        finalizePenPath(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -359,6 +395,8 @@ export function Canvas() {
     if (activeTool !== 'pen' && penActiveRef.current) {
       penActiveRef.current = false;
       penPointsRef.current = [];
+      penDraggingHandleRef.current = false;
+      penClosedRef.current = false;
       setPenPreview(null);
     }
   }, [activeTool]);
@@ -434,16 +472,16 @@ export function Canvas() {
   // ── POINTER DOWN on canvas ──
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
-      // Pen tool: click-to-place anchor points
+      // Pen tool: click-to-place anchor points, drag-to-create Bézier handles
       if (e.button === 0 && activeTool === 'pen') {
         e.preventDefault();
         const screen = clientToScreen(e.clientX, e.clientY);
         const world = screenToWorld(screen);
 
-        // Double-click: finalize path
+        // Double-click: finalize path (open)
         const now = Date.now();
         if (penActiveRef.current && penPointsRef.current.length >= 2 && now - penLastClickTimeRef.current < 350) {
-          finalizePenPath();
+          finalizePenPath(false);
           return;
         }
         penLastClickTimeRef.current = now;
@@ -457,15 +495,55 @@ export function Canvas() {
             const scrX = e.clientX - containerRect.left;
             const scrY = e.clientY - containerRect.top;
             if (Math.sqrt((scrX - firstScreen.x) ** 2 + (scrY - firstScreen.y) ** 2) < 10) {
-              finalizePenPath();
+              penClosedRef.current = true;
+              finalizePenPath(true);
               return;
             }
           }
         }
 
         penActiveRef.current = true;
-        penPointsRef.current = [...penPointsRef.current, world];
-        setPenPreview({ points: [...penPointsRef.current], cursor: world });
+        // Add new point with no handles (corner point)
+        const newPoint = { x: world.x, y: world.y, handleInX: 0, handleInY: 0, handleOutX: 0, handleOutY: 0 };
+        penPointsRef.current = [...penPointsRef.current, newPoint];
+        penDraggingHandleRef.current = true;
+
+        // Track drag for handle creation
+        const startClient = { x: e.clientX, y: e.clientY };
+        const pointIndex = penPointsRef.current.length - 1;
+
+        const onMove = (ev: globalThis.PointerEvent) => {
+          const moveScreen = clientToScreen(ev.clientX, ev.clientY);
+          const moveWorld = screenToWorld(moveScreen);
+          const dx = moveWorld.x - world.x;
+          const dy = moveWorld.y - world.y;
+          // If dragged beyond threshold, create symmetric handles
+          const dist = Math.sqrt((ev.clientX - startClient.x) ** 2 + (ev.clientY - startClient.y) ** 2);
+          if (dist > 3) {
+            const pts = [...penPointsRef.current];
+            pts[pointIndex] = {
+              ...pts[pointIndex]!,
+              handleOutX: dx,
+              handleOutY: dy,
+              handleInX: -dx,
+              handleInY: -dy,
+            };
+            penPointsRef.current = pts;
+            setPenPreview({ points: [...pts], cursor: moveWorld, draggingHandle: true });
+          }
+        };
+
+        const onUp = () => {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          penDraggingHandleRef.current = false;
+          setPenPreview({ points: [...penPointsRef.current], cursor: world, draggingHandle: false });
+        };
+
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+
+        setPenPreview({ points: [...penPointsRef.current], cursor: world, draggingHandle: false });
         setInteractionCursor('crosshair');
         return;
       }
@@ -531,15 +609,16 @@ export function Canvas() {
   // ── POINTER MOVE ──
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
-      // Pen tool: update cursor preview position
+      // Pen tool: update cursor preview position (but not during handle drag — that's handled separately)
       if (activeTool === 'pen') {
+        if (penDraggingHandleRef.current) return;
         const screen = clientToScreen(e.clientX, e.clientY);
         const world = screenToWorld(screen);
         if (penActiveRef.current) {
           setPenPreview((prev) =>
             prev
               ? { ...prev, cursor: world }
-              : { points: penPointsRef.current, cursor: world },
+              : { points: penPointsRef.current, cursor: world, draggingHandle: false },
           );
         }
         return;
@@ -851,25 +930,56 @@ export function Canvas() {
             overflow: 'visible',
           }}
         >
-          {/* Committed path segments */}
+          {/* Committed path segments (Bézier or line) */}
           {penPreview.points.length > 1 && (
-            <polyline
-              points={penPreview.points
-                .map((p) => {
-                  const s = worldToScreen(p);
-                  return `${s.x},${s.y}`;
-                })
-                .join(' ')}
+            <path
+              d={(() => {
+                const pts = penPreview.points;
+                const s0 = worldToScreen(pts[0]!);
+                let d = `M ${s0.x} ${s0.y}`;
+                for (let i = 1; i < pts.length; i++) {
+                  const prev = pts[i - 1]!;
+                  const curr = pts[i]!;
+                  const hasHandles =
+                    (prev.handleOutX !== 0 || prev.handleOutY !== 0) ||
+                    (curr.handleInX !== 0 || curr.handleInY !== 0);
+                  if (hasHandles) {
+                    const cp1 = worldToScreen({ x: prev.x + prev.handleOutX, y: prev.y + prev.handleOutY });
+                    const cp2 = worldToScreen({ x: curr.x + curr.handleInX, y: curr.y + curr.handleInY });
+                    const end = worldToScreen(curr);
+                    d += ` C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${end.x} ${end.y}`;
+                  } else {
+                    const end = worldToScreen(curr);
+                    d += ` L ${end.x} ${end.y}`;
+                  }
+                }
+                return d;
+              })()}
               fill="none"
               stroke="#4dabf7"
               strokeWidth="1.5"
             />
           )}
           {/* Live preview: dashed segment from last point to cursor */}
-          {penPreview.points.length > 0 && penPreview.cursor && (() => {
+          {penPreview.points.length > 0 && penPreview.cursor && !penPreview.draggingHandle && (() => {
             const last = penPreview.points[penPreview.points.length - 1]!;
+            // If last point has an outgoing handle, show a cubic bezier preview
+            const hasHandle = last.handleOutX !== 0 || last.handleOutY !== 0;
             const lastSc = worldToScreen(last);
             const curSc = worldToScreen(penPreview.cursor);
+            if (hasHandle) {
+              const cp1 = worldToScreen({ x: last.x + last.handleOutX, y: last.y + last.handleOutY });
+              return (
+                <path
+                  d={`M ${lastSc.x} ${lastSc.y} C ${cp1.x} ${cp1.y}, ${curSc.x} ${curSc.y}, ${curSc.x} ${curSc.y}`}
+                  fill="none"
+                  stroke="#4dabf7"
+                  strokeWidth="1"
+                  strokeDasharray="5 3"
+                  opacity="0.65"
+                />
+              );
+            }
             return (
               <line
                 x1={lastSc.x}
@@ -883,13 +993,35 @@ export function Canvas() {
               />
             );
           })()}
-          {/* Anchor point handles */}
+          {/* Bézier handle lines and circles */}
+          {penPreview.points.map((p, i) => {
+            const s = worldToScreen(p);
+            const elements: React.ReactNode[] = [];
+            // Show outgoing handle
+            if (p.handleOutX !== 0 || p.handleOutY !== 0) {
+              const hOut = worldToScreen({ x: p.x + p.handleOutX, y: p.y + p.handleOutY });
+              elements.push(
+                <line key={`hout-line-${i}`} x1={s.x} y1={s.y} x2={hOut.x} y2={hOut.y} stroke="#ff6b6b" strokeWidth="1" opacity="0.7" />,
+                <circle key={`hout-${i}`} cx={hOut.x} cy={hOut.y} r={3.5} fill="#ff6b6b" stroke="#fff" strokeWidth="0.8" />,
+              );
+            }
+            // Show incoming handle
+            if (p.handleInX !== 0 || p.handleInY !== 0) {
+              const hIn = worldToScreen({ x: p.x + p.handleInX, y: p.y + p.handleInY });
+              elements.push(
+                <line key={`hin-line-${i}`} x1={s.x} y1={s.y} x2={hIn.x} y2={hIn.y} stroke="#ff6b6b" strokeWidth="1" opacity="0.7" />,
+                <circle key={`hin-${i}`} cx={hIn.x} cy={hIn.y} r={3.5} fill="#ff6b6b" stroke="#fff" strokeWidth="0.8" />,
+              );
+            }
+            return <g key={`handles-${i}`}>{elements}</g>;
+          })}
+          {/* Anchor point squares */}
           {penPreview.points.map((p, i) => {
             const s = worldToScreen(p);
             const isFirst = i === 0 && penPreview.points.length >= 3;
             return (
               <rect
-                key={i}
+                key={`anchor-${i}`}
                 x={s.x - 4}
                 y={s.y - 4}
                 width={8}

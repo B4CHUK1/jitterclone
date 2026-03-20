@@ -46,6 +46,7 @@ const SNAP_PX = 8;
 export function TimelinePanel() {
   const document = useDocumentStore((s) => s.document);
   const moveKeyframe = useDocumentStore((s) => s.moveKeyframe);
+  const moveKeyframes = useDocumentStore((s) => s.moveKeyframes);
   const removeKeyframe = useDocumentStore((s) => s.removeKeyframe);
   const setKeyframe = useDocumentStore((s) => s.setKeyframe);
   const setKeyframeEasing = useDocumentStore((s) => s.setKeyframeEasing);
@@ -708,6 +709,7 @@ export function TimelinePanel() {
                 onAddKey={() => addKeyframeAtCurrentTime(row.node.id, row.property, currentTime)}
                 xForTime={timeScale.toX}
                 moveKeyframe={moveKeyframe}
+                moveKeyframes={moveKeyframes}
                 setSelectedKeyframes={setSelectedKeyframes}
                 selectedKeyframes={selectedKeyframes}
                 toggleKeyframeSelection={toggleKeyframeSelection}
@@ -905,6 +907,7 @@ function PropertyRow({
   top,
   height,
   moveKeyframe,
+  moveKeyframes,
   selectedKeyframes,
   setSelectedKeyframes,
   toggleKeyframeSelection,
@@ -923,6 +926,7 @@ function PropertyRow({
   top: number;
   height: number;
   moveKeyframe: (nodeId: string, property: AnimatableProperty, fromLocalTime: number, toLocalTime: number) => void;
+  moveKeyframes: (moves: Array<{ nodeId: string; property: AnimatableProperty; fromLocalTime: number; toLocalTime: number }>) => void;
   getNode: (nodeId: string) => SceneNode | undefined;
   selectedKeyframes: { nodeId: string; property: AnimatableProperty; time: number }[];
   setSelectedKeyframes: (selection: { nodeId: string; property: AnimatableProperty; time: number }[]) => void;
@@ -1014,11 +1018,9 @@ function PropertyRow({
                   ? selectedKeyframes
                   : [thisSel];
 
-                // Track last local times for cumulative moves
-                const lastTimes = new Map<string, number>();
-                for (const sel of dragSet) {
-                  lastTimes.set(`${sel.nodeId}_${sel.property}`, sel.time);
-                }
+                // Track last local times per keyframe using index (unique per keyframe)
+                // This avoids the bug where two keyframes on the same property share a map key
+                const lastTimes: number[] = dragSet.map((sel) => sel.time);
                 const initialGlobalTime = localToGlobalTime(key.time, node);
 
                 window.document.body.style.userSelect = 'none';
@@ -1030,15 +1032,34 @@ function PropertyRow({
                   const { time: snappedGlobal, snapped } = getSnapTime(rawGlobalTime, e.shiftKey, e.altKey);
                   const globalDelta = snappedGlobal - initialGlobalTime;
 
-                  for (const sel of dragSet) {
+                  // Build batch moves: collect all from→to pairs
+                  const moves: Array<{ nodeId: string; property: AnimatableProperty; fromLocalTime: number; toLocalTime: number }> = [];
+                  const newTimes: number[] = [];
+                  for (let i = 0; i < dragSet.length; i++) {
+                    const sel = dragSet[i]!;
                     const selNode = sel.nodeId === node.id ? node : getNode(sel.nodeId);
-                    if (!selNode) continue;
-                    const mapKey = `${sel.nodeId}_${sel.property}`;
-                    const lastTime = lastTimes.get(mapKey) ?? sel.time;
+                    if (!selNode) {
+                      newTimes.push(lastTimes[i]!);
+                      continue;
+                    }
+                    const fromTime = lastTimes[i]!;
                     const newLocalTime = clampKeyframeTime(sel.time + globalDelta, selNode);
-                    if (Math.abs(newLocalTime - lastTime) > 1e-9) {
-                      moveKeyframe(sel.nodeId, sel.property, lastTime, newLocalTime);
-                      lastTimes.set(mapKey, newLocalTime);
+                    newTimes.push(newLocalTime);
+                    if (Math.abs(newLocalTime - fromTime) > 1e-9) {
+                      moves.push({
+                        nodeId: sel.nodeId,
+                        property: sel.property,
+                        fromLocalTime: fromTime,
+                        toLocalTime: newLocalTime,
+                      });
+                    }
+                  }
+
+                  // Apply all moves atomically to prevent collisions
+                  if (moves.length > 0) {
+                    moveKeyframes(moves);
+                    for (let i = 0; i < newTimes.length; i++) {
+                      lastTimes[i] = newTimes[i]!;
                     }
                   }
 
@@ -1053,9 +1074,9 @@ function PropertyRow({
                   onSnapActive(null);
                   setDragTooltip(null);
                   // Update selected keyframes to their new times
-                  const updatedSelection = dragSet.map((sel) => ({
+                  const updatedSelection = dragSet.map((sel, i) => ({
                     ...sel,
-                    time: lastTimes.get(`${sel.nodeId}_${sel.property}`) ?? sel.time,
+                    time: lastTimes[i] ?? sel.time,
                   }));
                   setSelectedKeyframes(updatedSelection);
                 };

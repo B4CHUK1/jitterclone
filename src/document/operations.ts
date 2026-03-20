@@ -41,6 +41,8 @@ export function addNode(
     animation: overrides.animation ?? defaultNodeAnimation(),
     polygon: overrides.polygon ?? (type === 'polygon' ? { sides: 6 } : undefined),
     star: overrides.star ?? (type === 'star' ? { points: 5, innerRadius: 0.4 } : undefined),
+    pathData: overrides.pathData,
+    pathClosed: overrides.pathClosed,
     startTime: overrides.startTime ?? 0,
     endTime: overrides.endTime ?? doc.composition.duration,
   };
