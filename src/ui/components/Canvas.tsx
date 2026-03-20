@@ -45,6 +45,54 @@ import styles from './Canvas.module.css';
 // ── Drag threshold to distinguish click from drag ──
 const DRAG_THRESHOLD = 3; // pixels
 const SNAP_THRESHOLD_SCREEN_PX = 8;
+const PEN_CURVE_SAMPLE_STEPS = 24;
+
+interface PenPoint {
+  x: number;
+  y: number;
+  handleInX: number;
+  handleInY: number;
+  handleOutX: number;
+  handleOutY: number;
+}
+
+function cubicBezier1D(p0: number, p1: number, p2: number, p3: number, t: number): number {
+  const mt = 1 - t;
+  return (mt ** 3) * p0 + 3 * (mt ** 2) * t * p1 + 3 * mt * (t ** 2) * p2 + (t ** 3) * p3;
+}
+
+function expandBounds(bounds: { minX: number; minY: number; maxX: number; maxY: number }, x: number, y: number): void {
+  bounds.minX = Math.min(bounds.minX, x);
+  bounds.minY = Math.min(bounds.minY, y);
+  bounds.maxX = Math.max(bounds.maxX, x);
+  bounds.maxY = Math.max(bounds.maxY, y);
+}
+
+function computePenPathBounds(points: PenPoint[], closed: boolean): { minX: number; minY: number; maxX: number; maxY: number } {
+  const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  if (points.length === 0) return bounds;
+  for (const point of points) {
+    expandBounds(bounds, point.x, point.y);
+  }
+
+  const segmentCount = closed ? points.length : Math.max(0, points.length - 1);
+  for (let i = 0; i < segmentCount; i++) {
+    const from = points[i]!;
+    const to = points[(i + 1) % points.length]!;
+    const cp1x = from.x + from.handleOutX;
+    const cp1y = from.y + from.handleOutY;
+    const cp2x = to.x + to.handleInX;
+    const cp2y = to.y + to.handleInY;
+    for (let step = 1; step < PEN_CURVE_SAMPLE_STEPS; step++) {
+      const t = step / PEN_CURVE_SAMPLE_STEPS;
+      const x = cubicBezier1D(from.x, cp1x, cp2x, to.x, t);
+      const y = cubicBezier1D(from.y, cp1y, cp2y, to.y, t);
+      expandBounds(bounds, x, y);
+    }
+  }
+
+  return bounds;
+}
 
 // ── Interaction state machine ──
 type InteractionPhase =
@@ -91,18 +139,8 @@ export function Canvas() {
   const [, setRenderTick] = useState(0);
   const tick = useCallback(() => setRenderTick((t) => t + 1), []);
 
-  // Pen tool state — each point can have Bézier handles
-  interface PenPoint {
-    x: number;
-    y: number;
-    handleInX: number;
-    handleInY: number;
-    handleOutX: number;
-    handleOutY: number;
-  }
   const penPointsRef = useRef<PenPoint[]>([]);
   const penActiveRef = useRef(false);
-  const penLastClickTimeRef = useRef(0);
   const penDraggingHandleRef = useRef(false);
   const penClosedRef = useRef(false);
   const [penPreview, setPenPreview] = useState<{
@@ -311,31 +349,9 @@ export function Canvas() {
     penClosedRef.current = false;
     setPenPreview(null);
     setInteractionCursor(null);
-    penLastClickTimeRef.current = 0;
 
     if (points.length >= 2) {
-      // Calculate bounding box including handle positions for accurate sizing
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const p of points) {
-        // Include the point itself
-        if (p.x < minX) minX = p.x;
-        if (p.y < minY) minY = p.y;
-        if (p.x > maxX) maxX = p.x;
-        if (p.y > maxY) maxY = p.y;
-        // Include handle positions for accurate bounds
-        const hox = p.x + p.handleOutX;
-        const hoy = p.y + p.handleOutY;
-        const hix = p.x + p.handleInX;
-        const hiy = p.y + p.handleInY;
-        if (hox < minX) minX = hox;
-        if (hoy < minY) minY = hoy;
-        if (hox > maxX) maxX = hox;
-        if (hoy > maxY) maxY = hoy;
-        if (hix < minX) minX = hix;
-        if (hiy < minY) minY = hiy;
-        if (hix > maxX) maxX = hix;
-        if (hiy > maxY) maxY = hiy;
-      }
+      const { minX, minY, maxX, maxY } = computePenPathBounds(points, isClosed);
       const w = Math.max(1, maxX - minX);
       const h = Math.max(1, maxY - minY);
       const normalizedPoints: import('@/document/types').PathPoint[] = points.map((p) => ({
@@ -370,25 +386,21 @@ export function Canvas() {
     setTool('select');
   }, [addNode, select, setTool]);
 
-  // ── Pen tool keyboard: Enter = finalize, Escape = cancel ──
+  // ── Pen tool keyboard: Enter/Escape = finalize open path ──
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && penActiveRef.current) {
-        penActiveRef.current = false;
-        penPointsRef.current = [];
-        penDraggingHandleRef.current = false;
-        penClosedRef.current = false;
-        setPenPreview(null);
-        setInteractionCursor(null);
-        setTool('select');
+        e.preventDefault();
+        finalizePenPath(false);
       }
       if (e.key === 'Enter' && penActiveRef.current) {
+        e.preventDefault();
         finalizePenPath(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [finalizePenPath, setTool]);
+  }, [finalizePenPath]);
 
   // ── Cancel pen path when switching tools ──
   useEffect(() => {
@@ -477,14 +489,6 @@ export function Canvas() {
         e.preventDefault();
         const screen = clientToScreen(e.clientX, e.clientY);
         const world = screenToWorld(screen);
-
-        // Double-click: finalize path (open)
-        const now = Date.now();
-        if (penActiveRef.current && penPointsRef.current.length >= 2 && now - penLastClickTimeRef.current < 350) {
-          finalizePenPath(false);
-          return;
-        }
-        penLastClickTimeRef.current = now;
 
         // Click near first anchor point: close and finalize path
         if (penActiveRef.current && penPointsRef.current.length >= 3) {

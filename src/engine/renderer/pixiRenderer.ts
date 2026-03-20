@@ -231,6 +231,9 @@ export class PixiRenderer {
         quality,
         padding,
       });
+      // Keep transparent outside-shape pixels transparent.
+      // Repeating edge pixels causes a visible blurred rectangle.
+      (blurFilter as BlurFilter & { repeatEdgePixels?: boolean }).repeatEdgePixels = false;
       display.main.filters = [blurFilter];
       // Container must not also have a blur — only main gets it
       display.container.filters = [];
