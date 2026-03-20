@@ -3,6 +3,18 @@ import { createDocument } from '@/document/types';
 import type { PathPoint, SceneNode } from '@/document/types';
 import { addNode } from '@/document/operations';
 
+import { computePenPathBounds, normalizePenPath, type PenPoint } from '@/ui/components/penPathUtils';
+import { getNodeBlurFilterConfig } from '@/engine/renderer/pixiRenderer';
+
+function denormalizePoint(point: { x: number; y: number }, transform: { x: number; y: number; width: number; height: number }) {
+  const minX = transform.x - transform.width / 2;
+  const minY = transform.y - transform.height / 2;
+  return {
+    x: minX + point.x * transform.width,
+    y: minY + point.y * transform.height,
+  };
+}
+
 describe('Path closure and fill', () => {
   it('creates a path node with pathClosed flag', () => {
     const doc = createDocument('Test');
@@ -118,5 +130,44 @@ describe('Blur effect on shapes', () => {
     expect(node.style.fill.opacity).toBe(0.8);
     expect(node.style.effects[0]!.type).toBe('blur');
     expect(node.style.opacity).toBe(0.9);
+  });
+});
+
+
+describe('Pen path normalization', () => {
+  it('captures cubic extrema for bounds instead of anchor-only bounds', () => {
+    const points: PenPoint[] = [
+      { x: 100, y: 100, handleInX: 0, handleInY: 0, handleOutX: 150, handleOutY: -220 },
+      { x: 340, y: 240, handleInX: -160, handleInY: 260, handleOutX: 0, handleOutY: 0 },
+    ];
+
+    const bounds = computePenPathBounds(points, false);
+    expect(bounds.minY).toBeLessThan(100);
+    expect(bounds.maxY).toBeGreaterThan(240);
+  });
+
+  it('preview points and persisted path points stay in the same world-space positions', () => {
+    const points: PenPoint[] = [
+      { x: 120, y: 80, handleInX: 0, handleInY: 0, handleOutX: 80, handleOutY: -30 },
+      { x: 300, y: 190, handleInX: -70, handleInY: 40, handleOutX: 30, handleOutY: 50 },
+      { x: 260, y: 320, handleInX: -20, handleInY: -80, handleOutX: 0, handleOutY: 0 },
+    ];
+
+    const normalized = normalizePenPath(points, true);
+
+    const restored = normalized.pathData.map((point) => denormalizePoint(point, normalized.transform));
+    restored.forEach((point, index) => {
+      expect(point.x).toBeCloseTo(points[index]!.x, 6);
+      expect(point.y).toBeCloseTo(points[index]!.y, 6);
+    });
+  });
+});
+
+
+describe('Blur filter pipeline', () => {
+  it('creates a blur filter that keeps edge-repeat disabled', () => {
+    const config = getNodeBlurFilterConfig(12, 3);
+    expect(config.repeatEdgePixels).toBe(false);
+    expect(config.padding).toBe(Math.ceil(12 * 2 + 3));
   });
 });

@@ -41,58 +41,11 @@ import { RotateTooltipOverlay } from '@/ui/overlays/RotateTooltipOverlay';
 import { defaultTransform } from '@/engine/transform/transform';
 import { ROTATE_CURSOR } from '@/ui/cursors';
 import styles from './Canvas.module.css';
+import { normalizePenPath, type PenPoint } from './penPathUtils';
 
 // ── Drag threshold to distinguish click from drag ──
 const DRAG_THRESHOLD = 3; // pixels
 const SNAP_THRESHOLD_SCREEN_PX = 8;
-const PEN_CURVE_SAMPLE_STEPS = 24;
-
-interface PenPoint {
-  x: number;
-  y: number;
-  handleInX: number;
-  handleInY: number;
-  handleOutX: number;
-  handleOutY: number;
-}
-
-function cubicBezier1D(p0: number, p1: number, p2: number, p3: number, t: number): number {
-  const mt = 1 - t;
-  return (mt ** 3) * p0 + 3 * (mt ** 2) * t * p1 + 3 * mt * (t ** 2) * p2 + (t ** 3) * p3;
-}
-
-function expandBounds(bounds: { minX: number; minY: number; maxX: number; maxY: number }, x: number, y: number): void {
-  bounds.minX = Math.min(bounds.minX, x);
-  bounds.minY = Math.min(bounds.minY, y);
-  bounds.maxX = Math.max(bounds.maxX, x);
-  bounds.maxY = Math.max(bounds.maxY, y);
-}
-
-function computePenPathBounds(points: PenPoint[], closed: boolean): { minX: number; minY: number; maxX: number; maxY: number } {
-  const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-  if (points.length === 0) return bounds;
-  for (const point of points) {
-    expandBounds(bounds, point.x, point.y);
-  }
-
-  const segmentCount = closed ? points.length : Math.max(0, points.length - 1);
-  for (let i = 0; i < segmentCount; i++) {
-    const from = points[i]!;
-    const to = points[(i + 1) % points.length]!;
-    const cp1x = from.x + from.handleOutX;
-    const cp1y = from.y + from.handleOutY;
-    const cp2x = to.x + to.handleInX;
-    const cp2y = to.y + to.handleInY;
-    for (let step = 1; step < PEN_CURVE_SAMPLE_STEPS; step++) {
-      const t = step / PEN_CURVE_SAMPLE_STEPS;
-      const x = cubicBezier1D(from.x, cp1x, cp2x, to.x, t);
-      const y = cubicBezier1D(from.y, cp1y, cp2y, to.y, t);
-      expandBounds(bounds, x, y);
-    }
-  }
-
-  return bounds;
-}
 
 // ── Interaction state machine ──
 type InteractionPhase =
@@ -351,27 +304,14 @@ export function Canvas() {
     setInteractionCursor(null);
 
     if (points.length >= 2) {
-      const { minX, minY, maxX, maxY } = computePenPathBounds(points, isClosed);
-      const w = Math.max(1, maxX - minX);
-      const h = Math.max(1, maxY - minY);
-      const normalizedPoints: import('@/document/types').PathPoint[] = points.map((p) => ({
-        x: (p.x - minX) / w,
-        y: (p.y - minY) / h,
-        handleInX: p.handleInX / w || undefined,
-        handleInY: p.handleInY / h || undefined,
-        handleOutX: p.handleOutX / w || undefined,
-        handleOutY: p.handleOutY / h || undefined,
-      }));
+      const normalizedPath = normalizePenPath(points, isClosed);
       const id = addNode('path', {
         transform: {
           ...defaultTransform(),
-          x: minX + w / 2,
-          y: minY + h / 2,
-          width: w,
-          height: h,
+          ...normalizedPath.transform,
         },
-        pathData: normalizedPoints,
-        pathClosed: isClosed,
+        pathData: normalizedPath.pathData,
+        pathClosed: normalizedPath.pathClosed,
         style: {
           fill: { color: '#5B8DEF', opacity: isClosed ? 1 : 0 },
           stroke: { color: '#5B8DEF', width: 2, opacity: 1 },
