@@ -12,14 +12,10 @@ import {
   KeyRound,
   ChevronDown,
   ChevronRight as ChevronRightIcon,
-  Timer,
   Diamond,
-  Plus,
 } from 'lucide-react';
 import {
-  evaluateNodeAtTime,
   hasKeyframeAtTime,
-  isPropertyAnimated,
   globalToLocalTime,
   localToGlobalTime,
   clampKeyframeTime,
@@ -73,13 +69,25 @@ export function TimelinePanel() {
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const select = useEditorStore((s) => s.select);
   const addKeyframeAtCurrentTime = useDocumentStore((s) => s.addKeyframeAtCurrentTime);
-  const togglePropertyStopwatch = useDocumentStore((s) => s.togglePropertyStopwatch);
 
   const [expandedLayers, setExpandedLayers] = useState<Record<string, boolean>>({});
   const [draggingPlayhead, setDraggingPlayhead] = useState(false);
   const [clipboardKeys, setClipboardKeys] = useState<{ nodeId: string; property: AnimatableProperty; time: number; value: number }[]>([]);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const resumePlaybackRef = useRef(false);
+
+  // Box select state
+  const [boxSelectRect, setBoxSelectRect] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const boxSelectActiveRef = useRef(false);
+
+  const toTimelineSpace = useCallback((clientX: number, clientY: number) => {
+    if (!viewportRef.current) return { x: 0, y: 0 };
+    const rect = viewportRef.current.getBoundingClientRect();
+    return {
+      x: clientX - rect.left + viewportRef.current.scrollLeft,
+      y: clientY - rect.top + viewportRef.current.scrollTop,
+    };
+  }, []);
 
   // Snap line state
   const [activeSnapTime, setActiveSnapTime] = useState<number | null>(null);
@@ -171,6 +179,19 @@ export function TimelinePanel() {
     if (event.target.closest('[data-layer-label]')) return;
     if (event.target.closest('button')) return;
 
+    // Clicks in property time cells start box selection, not scrubbing
+    if (event.target.closest('[data-property-time-cell]')) {
+      event.preventDefault();
+      const pos = toTimelineSpace(event.clientX, event.clientY);
+      boxSelectActiveRef.current = true;
+      setBoxSelectRect({ x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y });
+      if (!event.shiftKey) {
+        setSelectedKeyframes([]);
+      }
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+
     event.preventDefault();
     resumePlaybackRef.current = isPlaying;
     if (isPlaying) pause();
@@ -181,12 +202,61 @@ export function TimelinePanel() {
   };
 
   const onScrubMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (boxSelectActiveRef.current) {
+      event.preventDefault();
+      const pos = toTimelineSpace(event.clientX, event.clientY);
+      const newRect = { ...(boxSelectRect ?? { x1: pos.x, y1: pos.y }), x2: pos.x, y2: pos.y } as typeof boxSelectRect & NonNullable<typeof boxSelectRect>;
+      setBoxSelectRect(newRect);
+
+      const minX = Math.min(newRect.x1, newRect.x2);
+      const maxX = Math.max(newRect.x1, newRect.x2);
+      const minY = Math.min(newRect.y1, newRect.y2);
+      const maxY = Math.max(newRect.y1, newRect.y2);
+      const minTime = Math.max(0, timeScale.toTime(minX - TIMELINE_LABEL_WIDTH));
+      const maxTime = timeScale.toTime(maxX - TIMELINE_LABEL_WIDTH);
+
+      const newSelected: typeof selectedKeyframes = [];
+      for (const row of layout.rows) {
+        if (row.kind !== 'property') continue;
+        const rowMidY = row.top + row.height / 2;
+        if (rowMidY < minY || rowMidY > maxY) continue;
+        for (const key of row.node.animation.properties[row.property].keyframes) {
+          const globalTime = localToGlobalTime(key.time, row.node);
+          if (globalTime >= minTime && globalTime <= maxTime) {
+            newSelected.push({ nodeId: row.node.id, property: row.property, time: key.time });
+          }
+        }
+      }
+
+      if (event.shiftKey) {
+        const merged = [...selectedKeyframes];
+        for (const sel of newSelected) {
+          if (!merged.some((s) => s.nodeId === sel.nodeId && s.property === sel.property && Math.abs(s.time - sel.time) < 1e-6)) {
+            merged.push(sel);
+          }
+        }
+        setSelectedKeyframes(merged);
+      } else {
+        setSelectedKeyframes(newSelected);
+      }
+      return;
+    }
+
     if (!draggingPlayhead) return;
     event.preventDefault();
     updateTimeFromClientX(event.clientX, event.shiftKey, event.altKey);
   };
 
   const endScrub = (event: PointerEvent<HTMLDivElement>) => {
+    if (boxSelectActiveRef.current) {
+      boxSelectActiveRef.current = false;
+      setBoxSelectRect(null);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
+
     if (!draggingPlayhead) return;
     setDraggingPlayhead(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -549,6 +619,19 @@ export function TimelinePanel() {
             <div className={styles.dropIndicator} style={{ top: `${dropIndicatorTop}px` }} />
           )}
 
+          {/* ── Box select rectangle ── */}
+          {boxSelectRect && (
+            <div
+              className={styles.boxSelectRect}
+              style={{
+                left: `${Math.min(boxSelectRect.x1, boxSelectRect.x2)}px`,
+                top: `${Math.min(boxSelectRect.y1, boxSelectRect.y2)}px`,
+                width: `${Math.abs(boxSelectRect.x2 - boxSelectRect.x1)}px`,
+                height: `${Math.abs(boxSelectRect.y2 - boxSelectRect.y1)}px`,
+              }}
+            />
+          )}
+
           {/* ── Ruler ── */}
           <div className={styles.row} style={{ top: 0, height: `${TIMELINE_RULER_HEIGHT}px` }}>
             <div className={`${styles.labelCell} ${styles.rulerLabel}`}>Time</div>
@@ -623,7 +706,6 @@ export function TimelinePanel() {
                 currentTime={currentTime}
                 onSeek={setCurrentTime}
                 onAddKey={() => addKeyframeAtCurrentTime(row.node.id, row.property, currentTime)}
-                onToggleStopwatch={() => togglePropertyStopwatch(row.node.id, row.property, currentTime)}
                 xForTime={timeScale.toX}
                 moveKeyframe={moveKeyframe}
                 setSelectedKeyframes={setSelectedKeyframes}
@@ -819,7 +901,6 @@ function PropertyRow({
   currentTime,
   onSeek,
   onAddKey,
-  onToggleStopwatch,
   xForTime,
   top,
   height,
@@ -838,7 +919,6 @@ function PropertyRow({
   currentTime: number;
   onSeek: (time: number) => void;
   onAddKey: () => void;
-  onToggleStopwatch: () => void;
   xForTime: (time: number) => number;
   top: number;
   height: number;
@@ -851,7 +931,6 @@ function PropertyRow({
   getSnapTime: (time: number, lock: boolean, disable: boolean) => { time: number; snapped: number | null };
   onSnapActive: (time: number | null) => void;
 }) {
-  const isAnimated = isPropertyAnimated(node, property);
   const keyframes = node.animation.properties[property].keyframes;
   const clipDuration = getClipDuration(node);
   const localTime = globalToLocalTime(currentTime, node);
@@ -872,32 +951,28 @@ function PropertyRow({
     if (target) onSeek(localToGlobalTime(target.time, node));
   };
 
-  const currentValue = evaluateNodeAtTime(node, currentTime);
-  const display =
-    property === 'opacity'
-      ? `${Math.round(currentValue.style.opacity * 100)}%`
-      : `${Number(currentValue.transform[property as keyof typeof currentValue.transform]).toFixed(2)}`;
 
   return (
     <div className={styles.row} style={{ top: `${top}px`, height: `${height}px` }}>
       <div className={`${styles.labelCell} ${styles.propertyLabelCell}`}>
         <div className={styles.propertyLabel}>{label}</div>
-        <button type="button" className={`${styles.stopwatchButton} ${isAnimated ? styles.stopwatchActive : ''}`} onClick={onToggleStopwatch} title={isAnimated ? 'Disable animation' : 'Enable animation'}>
-          <Timer size={12} />
-        </button>
         <button type="button" className={styles.miniButton} onClick={() => navigateKeyframe('prev')} title="Previous keyframe">
           <ChevronLeft size={12} />
         </button>
-        <button type="button" className={styles.miniButton} onClick={onAddKey} title={hasKeyframeAtTime(node, property, localTime) ? 'Keyframe exists' : 'Add keyframe'}>
-          {hasKeyframeAtTime(node, property, localTime) ? <Diamond size={10} fill="currentColor" /> : <Plus size={12} />}
+        <button
+          type="button"
+          className={`${styles.miniButton} ${hasKeyframeAtTime(node, property, localTime) ? styles.keyframeButtonActive : ''}`}
+          onClick={onAddKey}
+          title={hasKeyframeAtTime(node, property, localTime) ? 'Keyframe at current time' : 'Add keyframe'}
+        >
+          <Diamond size={10} fill={hasKeyframeAtTime(node, property, localTime) ? 'currentColor' : 'none'} />
         </button>
         <button type="button" className={styles.miniButton} onClick={() => navigateKeyframe('next')} title="Next keyframe">
           <ChevronRight size={12} />
         </button>
-        <div className={styles.valueReadout}>{display}</div>
       </div>
 
-      <div className={`${styles.timeCell} ${styles.propertyTimeCell}`}>
+      <div data-property-time-cell className={`${styles.timeCell} ${styles.propertyTimeCell}`}>
         {visibleKeyframes.map((key) => {
           const globalTime = localToGlobalTime(key.time, node);
           const left = xForTime(globalTime);
