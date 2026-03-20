@@ -29,6 +29,7 @@ import {
   removeNodeKeyframe,
   setNodePropertyAnimation,
   updateNodeTiming,
+  reorderRootNodes,
 } from '@/document/operations';
 import type { Transform } from '@/engine/transform';
 import {
@@ -49,7 +50,7 @@ interface DocumentState {
   updateStyle: (nodeId: string, updates: Partial<NodeStyle>) => void;
   updateProps: (nodeId: string, updates: Partial<Pick<SceneNode, 'name' | 'visible' | 'locked'>>) => void;
   updateComposition: (
-    updates: Partial<Pick<Document['composition'], 'name' | 'width' | 'height' | 'background' | 'duration' | 'fps'>>,
+    updates: Partial<Pick<Document['composition'], 'name' | 'width' | 'height' | 'background' | 'duration' | 'fps' | 'workAreaStart' | 'workAreaEnd'>>,
   ) => void;
 
   /** Set a keyframe at LOCAL time */
@@ -80,6 +81,9 @@ interface DocumentState {
 
   /** Update clip timing (startTime/endTime) */
   updateTiming: (nodeId: string, updates: { startTime?: number; endTime?: number }) => void;
+
+  /** Reorder root layer ids */
+  reorderLayers: (orderedIds: string[]) => void;
 
   getNode: (nodeId: string) => SceneNode | undefined;
   reset: (doc?: Document) => void;
@@ -158,7 +162,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     set({ document: nextDoc });
   },
 
-  setAnimatableValue: (nodeId, property, value, globalTime, _autoKeyframe) => {
+  setAnimatableValue: (nodeId, property, value, globalTime, autoKeyframe) => {
     const doc = get().document;
     const node = doc.nodes[nodeId];
     if (!node) return;
@@ -173,8 +177,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       },
     };
 
-    // If the property is animated, insert/update keyframe at this time
-    if (propertyState.animated) {
+    // If the property is animated and auto-keyframe is on, insert/update keyframe at this time
+    if (propertyState.animated && autoKeyframe) {
       const localTime = clampKeyframeTime(globalToLocalTime(globalTime, node), node);
       nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: localTime, value });
     }
@@ -233,6 +237,10 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   updateTiming: (nodeId, updates) => {
     set({ document: updateNodeTiming(get().document, nodeId, updates) });
+  },
+
+  reorderLayers: (orderedIds) => {
+    set({ document: reorderRootNodes(get().document, orderedIds) });
   },
 
   getNode: (nodeId) => {

@@ -50,6 +50,8 @@ export interface Composition {
   readonly background: string;
   readonly duration: number;
   readonly fps: number;
+  readonly workAreaStart: number;
+  readonly workAreaEnd: number;
 }
 
 export type AnimatableProperty = 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotation' | 'opacity';
@@ -117,6 +119,8 @@ export function createDocument(name: string, width = 1920, height = 1080): Docum
       background: '#1a1a2e',
       duration: 5,
       fps: 30,
+      workAreaStart: 0,
+      workAreaEnd: 5,
     },
     width,
     height,

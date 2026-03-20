@@ -158,7 +158,7 @@ export function updateNodeProps(
 
 export function updateComposition(
   doc: Document,
-  updates: Partial<Pick<Composition, 'name' | 'width' | 'height' | 'background' | 'duration' | 'fps'>>,
+  updates: Partial<Pick<Composition, 'name' | 'width' | 'height' | 'background' | 'duration' | 'fps' | 'workAreaStart' | 'workAreaEnd'>>,
 ): Document {
   const nextComposition = {
     ...doc.composition,
@@ -313,6 +313,10 @@ export function reparentNode(
     },
     rootNodeIds: newRootIds,
   };
+}
+
+export function reorderRootNodes(doc: Document, orderedIds: string[]): Document {
+  return { ...doc, rootNodeIds: orderedIds };
 }
 
 export function getChildren(doc: Document, parentId: string | null): SceneNode[] {

@@ -60,24 +60,32 @@ export function App() {
     if (!isPlaying) return;
     let frameId = 0;
     let last = performance.now();
+    const waStart = composition.workAreaStart;
+    const waEnd = composition.workAreaEnd;
 
     const tick = (now: number) => {
       const dt = (now - last) / 1000;
       last = now;
       useTimelineStore.setState((state) => {
         const next = state.currentTime + dt;
-        if (next >= composition.duration) {
+        if (next >= waEnd) {
           pause();
-          return { currentTime: composition.duration };
+          return { currentTime: waEnd };
         }
         return { currentTime: next };
       });
       frameId = requestAnimationFrame(tick);
     };
 
+    // If playhead is before work area start, jump to it
+    const current = useTimelineStore.getState().currentTime;
+    if (current < waStart) {
+      useTimelineStore.setState({ currentTime: waStart });
+    }
+
     frameId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frameId);
-  }, [isPlaying, composition.duration, pause]);
+  }, [isPlaying, composition.workAreaStart, composition.workAreaEnd, pause]);
 
   return (
     <div className={styles.app}>
