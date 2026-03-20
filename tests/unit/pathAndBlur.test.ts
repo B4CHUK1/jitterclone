@@ -4,7 +4,7 @@ import type { PathPoint, SceneNode } from '@/document/types';
 import { addNode } from '@/document/operations';
 
 import { computePenPathBounds, normalizePenPath, type PenPoint } from '@/ui/components/penPathUtils';
-import { getNodeBlurFilterConfig } from '@/engine/renderer/pixiRenderer';
+import { getBlurFilterArea, getNodeBlurFilterConfig } from '@/engine/renderer/pixiRenderer';
 
 function denormalizePoint(point: { x: number; y: number }, transform: { x: number; y: number; width: number; height: number }) {
   const minX = transform.x - transform.width / 2;
@@ -12,6 +12,20 @@ function denormalizePoint(point: { x: number; y: number }, transform: { x: numbe
   return {
     x: minX + point.x * transform.width,
     y: minY + point.y * transform.height,
+  };
+}
+
+function sampleCubicPoint(
+  p0: { x: number; y: number },
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  p3: { x: number; y: number },
+  t: number,
+) {
+  const mt = 1 - t;
+  return {
+    x: (mt ** 3) * p0.x + 3 * (mt ** 2) * t * p1.x + 3 * mt * (t ** 2) * p2.x + (t ** 3) * p3.x,
+    y: (mt ** 3) * p0.y + 3 * (mt ** 2) * t * p1.y + 3 * mt * (t ** 2) * p2.y + (t ** 3) * p3.y,
   };
 }
 
@@ -137,13 +151,52 @@ describe('Blur effect on shapes', () => {
 describe('Pen path normalization', () => {
   it('captures cubic extrema for bounds instead of anchor-only bounds', () => {
     const points: PenPoint[] = [
-      { x: 100, y: 100, handleInX: 0, handleInY: 0, handleOutX: 150, handleOutY: -220 },
-      { x: 340, y: 240, handleInX: -160, handleInY: 260, handleOutX: 0, handleOutY: 0 },
+      { x: 100, y: 200, handleInX: 0, handleInY: 0, handleOutX: 120, handleOutY: -260 },
+      { x: 300, y: 220, handleInX: -140, handleInY: 280, handleOutX: 0, handleOutY: 0 },
     ];
 
     const bounds = computePenPathBounds(points, false);
-    expect(bounds.minY).toBeLessThan(100);
-    expect(bounds.maxY).toBeGreaterThan(240);
+    expect(bounds.minY).toBeLessThan(200);
+    expect(bounds.maxY).toBeGreaterThan(220);
+  });
+
+  it('matches sampled cubic bounds and does not introduce transform translation drift', () => {
+    const points: PenPoint[] = [
+      { x: 220, y: 170, handleInX: 0, handleInY: 0, handleOutX: 240, handleOutY: -210 },
+      { x: 520, y: 260, handleInX: -280, handleInY: 340, handleOutX: 0, handleOutY: 0 },
+    ];
+    const bounds = computePenPathBounds(points, false);
+
+    let sampledMinX = Infinity;
+    let sampledMinY = Infinity;
+    let sampledMaxX = -Infinity;
+    let sampledMaxY = -Infinity;
+    for (let i = 0; i <= 1000; i++) {
+      const t = i / 1000;
+      const pt = sampleCubicPoint(
+        { x: points[0]!.x, y: points[0]!.y },
+        { x: points[0]!.x + points[0]!.handleOutX, y: points[0]!.y + points[0]!.handleOutY },
+        { x: points[1]!.x + points[1]!.handleInX, y: points[1]!.y + points[1]!.handleInY },
+        { x: points[1]!.x, y: points[1]!.y },
+        t,
+      );
+      sampledMinX = Math.min(sampledMinX, pt.x);
+      sampledMinY = Math.min(sampledMinY, pt.y);
+      sampledMaxX = Math.max(sampledMaxX, pt.x);
+      sampledMaxY = Math.max(sampledMaxY, pt.y);
+    }
+
+    expect(bounds.minX).toBeCloseTo(sampledMinX, 0);
+    expect(bounds.maxX).toBeCloseTo(sampledMaxX, 0);
+    expect(bounds.minY).toBeCloseTo(sampledMinY, 0);
+    expect(bounds.maxY).toBeCloseTo(sampledMaxY, 0);
+
+    const normalized = normalizePenPath(points, false);
+    const restored = normalized.pathData.map((point) => denormalizePoint(point, normalized.transform));
+    expect(restored[0]!.x).toBeCloseTo(points[0]!.x, 6);
+    expect(restored[0]!.y).toBeCloseTo(points[0]!.y, 6);
+    expect(restored[1]!.x).toBeCloseTo(points[1]!.x, 6);
+    expect(restored[1]!.y).toBeCloseTo(points[1]!.y, 6);
   });
 
   it('preview points and persisted path points stay in the same world-space positions', () => {
@@ -161,6 +214,19 @@ describe('Pen path normalization', () => {
       expect(point.y).toBeCloseTo(points[index]!.y, 6);
     });
   });
+
+  it('keeps finalize transform anchored to placed points even when handles overshoot', () => {
+    const points: PenPoint[] = [
+      { x: 200, y: 200, handleInX: 0, handleInY: 0, handleOutX: 260, handleOutY: -220 },
+      { x: 360, y: 240, handleInX: -250, handleInY: 280, handleOutX: 0, handleOutY: 0 },
+      { x: 420, y: 300, handleInX: 0, handleInY: 0, handleOutX: 0, handleOutY: 0 },
+    ];
+    const normalized = normalizePenPath(points, true);
+    expect(normalized.transform.x).toBe(310);
+    expect(normalized.transform.y).toBe(250);
+    expect(normalized.transform.width).toBe(220);
+    expect(normalized.transform.height).toBe(100);
+  });
 });
 
 
@@ -169,5 +235,13 @@ describe('Blur filter pipeline', () => {
     const config = getNodeBlurFilterConfig(12, 3);
     expect(config.repeatEdgePixels).toBe(false);
     expect(config.padding).toBe(Math.ceil(12 * 2 + 3));
+  });
+
+  it('builds a blur filter area from shape bounds plus effect padding', () => {
+    const area = getBlurFilterArea({ x: 100, y: 200, width: 80, height: 40 }, 12);
+    expect(area.x).toBe(88);
+    expect(area.y).toBe(188);
+    expect(area.width).toBe(104);
+    expect(area.height).toBe(64);
   });
 });
