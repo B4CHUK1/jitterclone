@@ -1,10 +1,13 @@
 import type {
   AnimatableProperty,
+  CubicBezierEasing,
   Document,
+  EasingPreset,
   Keyframe,
   NodeAnimation,
   SceneNode,
 } from '@/document/types';
+import { EASING_PRESETS } from '@/document/types';
 
 export function getPropertyStaticValue(node: SceneNode, property: AnimatableProperty): number {
   switch (property) {
@@ -52,9 +55,86 @@ export function applyStaticValueToNode(
   }
 }
 
+// ── Cubic Bezier Evaluation ──
+// Standard algorithm used by CSS transitions (same as WebKit/Blink)
+
+function sampleCurveX(ax: number, bx: number, cx: number, t: number): number {
+  return ((ax * t + bx) * t + cx) * t;
+}
+
+function sampleCurveY(ay: number, by: number, cy: number, t: number): number {
+  return ((ay * t + by) * t + cy) * t;
+}
+
+function sampleCurveDerivativeX(ax: number, bx: number, cx: number, t: number): number {
+  return (3.0 * ax * t + 2.0 * bx) * t + cx;
+}
+
+/**
+ * Solve cubic-bezier for Y given X using Newton-Raphson + bisection fallback.
+ */
+function solveCubicBezier(x1: number, y1: number, x2: number, y2: number, x: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+
+  const cx = 3.0 * x1;
+  const bx = 3.0 * (x2 - x1) - cx;
+  const ax = 1.0 - cx - bx;
+
+  const cy = 3.0 * y1;
+  const by = 3.0 * (y2 - y1) - cy;
+  const ay = 1.0 - cy - by;
+
+  // Newton-Raphson
+  let t = x;
+  for (let i = 0; i < 8; i++) {
+    const xEst = sampleCurveX(ax, bx, cx, t) - x;
+    if (Math.abs(xEst) < 1e-7) {
+      return sampleCurveY(ay, by, cy, t);
+    }
+    const d = sampleCurveDerivativeX(ax, bx, cx, t);
+    if (Math.abs(d) < 1e-7) break;
+    t -= xEst / d;
+  }
+
+  // Bisection fallback
+  let lo = 0;
+  let hi = 1;
+  t = x;
+  for (let i = 0; i < 20; i++) {
+    const xEst = sampleCurveX(ax, bx, cx, t);
+    if (Math.abs(xEst - x) < 1e-7) break;
+    if (x > xEst) lo = t;
+    else hi = t;
+    t = (lo + hi) / 2;
+  }
+
+  return sampleCurveY(ay, by, cy, t);
+}
+
+/**
+ * Apply easing to a linear 0-1 parameter.
+ */
+export function applyEasing(t: number, easing: EasingPreset, bezier?: CubicBezierEasing): number {
+  if (t <= 0) return 0;
+  if (t >= 1) return 1;
+
+  if (easing === 'hold') return 0;
+
+  if (easing === 'custom' && bezier) {
+    return solveCubicBezier(bezier.x1, bezier.y1, bezier.x2, bezier.y2, t);
+  }
+
+  const preset = EASING_PRESETS[easing === 'custom' ? 'linear' : easing];
+  if (!preset || easing === 'linear') return t;
+
+  return solveCubicBezier(preset.x1, preset.y1, preset.x2, preset.y2, t);
+}
+
 /**
  * Evaluate a keyframe track at a given LOCAL time.
  * Keyframe times are always relative to the clip (local time).
+ * Applies per-keyframe easing curves.
  */
 function evaluateTrack(track: Keyframe[], localTime: number): number | undefined {
   if (track.length === 0) return undefined;
@@ -68,7 +148,8 @@ function evaluateTrack(track: Keyframe[], localTime: number): number | undefined
       const span = b.time - a.time;
       if (span <= 0) return b.value;
       const t = (localTime - a.time) / span;
-      return a.value + (b.value - a.value) * t;
+      const easedT = applyEasing(t, a.easing ?? 'linear', a.bezier);
+      return a.value + (b.value - a.value) * easedT;
     }
   }
 

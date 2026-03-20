@@ -11,7 +11,10 @@
 import { create } from 'zustand';
 import type {
   AnimatableProperty,
+  CubicBezierEasing,
   Document,
+  EasingPreset,
+  Effect,
   NodeType,
   NodeStyle,
   SceneNode,
@@ -35,9 +38,12 @@ import type { Transform } from '@/engine/transform';
 import {
   applyStaticValueToNode,
   evaluateNodeAtTime,
+  getPropertyStaticValue,
   globalToLocalTime,
   clampKeyframeTime,
 } from '@/engine/animation';
+import type { AnimationPreset } from '@/engine/animation/presets';
+import { getPresetKeyframes } from '@/engine/animation/presets';
 
 interface DocumentState {
   document: Document;
@@ -79,11 +85,26 @@ interface DocumentState {
   /** Add a keyframe at the current GLOBAL time */
   addKeyframeAtCurrentTime: (nodeId: string, property: AnimatableProperty, globalTime: number) => void;
 
+  /** Set easing on a keyframe */
+  setKeyframeEasing: (nodeId: string, property: AnimatableProperty, localTime: number, easing: EasingPreset, bezier?: CubicBezierEasing) => void;
+  /** Apply animation preset */
+  applyPreset: (nodeId: string, preset: AnimationPreset, globalTime: number) => void;
+  /** Add an effect to a node */
+  addEffect: (nodeId: string, effect: Effect) => void;
+  /** Remove an effect by index */
+  removeEffect: (nodeId: string, index: number) => void;
+
   /** Update clip timing (startTime/endTime) */
   updateTiming: (nodeId: string, updates: { startTime?: number; endTime?: number }) => void;
 
   /** Reorder root layer ids */
   reorderLayers: (orderedIds: string[]) => void;
+
+  /** Undo/Redo */
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 
   getNode: (nodeId: string) => SceneNode | undefined;
   reset: (doc?: Document) => void;
@@ -99,20 +120,40 @@ function getEvaluatedAnimatableValue(
   return evaluated.transform[property as keyof Transform] as number;
 }
 
+// ── Undo/Redo History ──
+const MAX_UNDO = 100;
+const undoStack: Document[] = [];
+const redoStack: Document[] = [];
+
+function pushUndo(doc: Document) {
+  undoStack.push(doc);
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  redoStack.length = 0; // clear redo on new action
+}
+
+/** Wrapper that records undo before mutating */
+function withUndo(set: (s: Partial<DocumentState>) => void, get: () => DocumentState, nextDoc: Document) {
+  pushUndo(get().document);
+  set({ document: nextDoc, canUndo: true, canRedo: false });
+}
+
 export const useDocumentStore = create<DocumentState>((set, get) => ({
   document: createDocument('Untitled', 1920, 1080),
+  canUndo: false,
+  canRedo: false,
 
   addNode: (type, overrides) => {
     const result = addNode(get().document, type, overrides);
-    set({ document: result.doc });
+    withUndo(set, get, result.doc);
     return result.nodeId;
   },
 
   removeNode: (nodeId) => {
-    set({ document: removeNode(get().document, nodeId) });
+    withUndo(set, get, removeNode(get().document, nodeId));
   },
 
   updateTransform: (nodeId, updates) => {
+    // No undo for continuous transforms (drag) to avoid flooding history
     set({ document: updateNodeTransform(get().document, nodeId, updates) });
   },
 
@@ -121,15 +162,15 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   },
 
   updateStyle: (nodeId, updates) => {
-    set({ document: updateNodeStyle(get().document, nodeId, updates) });
+    withUndo(set, get, updateNodeStyle(get().document, nodeId, updates));
   },
 
   updateProps: (nodeId, updates) => {
-    set({ document: updateNodeProps(get().document, nodeId, updates) });
+    withUndo(set, get, updateNodeProps(get().document, nodeId, updates));
   },
 
   updateComposition: (updates) => {
-    set({ document: updateComposition(get().document, updates) });
+    withUndo(set, get, updateComposition(get().document, updates));
   },
 
   setKeyframe: (nodeId, property, localTime, value) => {
@@ -137,15 +178,11 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     const node = doc.nodes[nodeId];
     if (!node) return;
     const clamped = clampKeyframeTime(localTime, node);
-    set({
-      document: setNodeKeyframe(doc, nodeId, property, { time: clamped, value }),
-    });
+    withUndo(set, get, setNodeKeyframe(doc, nodeId, property, { time: clamped, value, easing: 'linear' as const }));
   },
 
   removeKeyframe: (nodeId, property, localTime) => {
-    set({
-      document: removeNodeKeyframe(get().document, nodeId, property, localTime),
-    });
+    withUndo(set, get, removeNodeKeyframe(get().document, nodeId, property, localTime));
   },
 
   moveKeyframe: (nodeId, property, fromLocalTime, toLocalTime) => {
@@ -158,7 +195,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     if (!keyframe) return;
     const clamped = clampKeyframeTime(toLocalTime, node);
     let nextDoc = removeNodeKeyframe(doc, nodeId, property, fromLocalTime);
-    nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: clamped, value: keyframe.value });
+    nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: clamped, value: keyframe.value, easing: keyframe.easing ?? 'linear', bezier: keyframe.bezier });
     set({ document: nextDoc });
   },
 
@@ -180,7 +217,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     // If the property is animated and auto-keyframe is on, insert/update keyframe at this time
     if (propertyState.animated && autoKeyframe) {
       const localTime = clampKeyframeTime(globalToLocalTime(globalTime, node), node);
-      nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: localTime, value });
+      nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: localTime, value, easing: 'linear' as const });
     }
 
     set({ document: nextDoc });
@@ -200,7 +237,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         animated: true,
         keyframes: [],
       });
-      nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: localTime, value });
+      nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: localTime, value, easing: 'linear' as const });
       set({ document: nextDoc });
       return;
     }
@@ -231,8 +268,72 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     if (!node.animation.properties[property].animated) {
       nextDoc = setNodePropertyAnimation(nextDoc, nodeId, property, { animated: true, keyframes: [] });
     }
-    nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: localTime, value });
+    nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: localTime, value, easing: 'linear' as const });
     set({ document: nextDoc });
+  },
+
+  setKeyframeEasing: (nodeId, property, localTime, easing, bezier) => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node) return;
+    const track = node.animation.properties[property].keyframes;
+    const keyframe = track.find((k) => Math.abs(k.time - localTime) < 1e-6);
+    if (!keyframe) return;
+    // Remove old keyframe and re-insert with new easing
+    let nextDoc = removeNodeKeyframe(doc, nodeId, property, localTime);
+    nextDoc = setNodeKeyframe(nextDoc, nodeId, property, {
+      time: keyframe.time,
+      value: keyframe.value,
+      easing,
+      bezier,
+    });
+    withUndo(set, get, nextDoc);
+  },
+
+  applyPreset: (nodeId, preset, globalTime) => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node) return;
+    const localTime = globalToLocalTime(globalTime, node);
+
+    // Get current static values for relative offset
+    const currentValues: Record<string, number> = {};
+    for (const prop of ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'opacity'] as const) {
+      currentValues[prop] = getPropertyStaticValue(node, prop);
+    }
+
+    const tracks = getPresetKeyframes(preset, localTime, currentValues as Record<import('@/document/types').AnimatableProperty, number>);
+
+    let nextDoc = doc;
+    for (const track of tracks) {
+      // Enable animation on the property
+      nextDoc = setNodePropertyAnimation(nextDoc, nodeId, track.property, {
+        animated: true,
+        keyframes: [],
+      });
+      // Add all keyframes
+      for (const kf of track.keyframes) {
+        nextDoc = setNodeKeyframe(nextDoc, nodeId, track.property, kf);
+      }
+    }
+    withUndo(set, get, nextDoc);
+  },
+
+  addEffect: (nodeId, effect) => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node) return;
+    withUndo(set, get, updateNodeStyle(doc, nodeId, {
+      effects: [...node.style.effects, effect],
+    }));
+  },
+
+  removeEffect: (nodeId, index) => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node) return;
+    const effects = node.style.effects.filter((_, i) => i !== index);
+    withUndo(set, get, updateNodeStyle(doc, nodeId, { effects }));
   },
 
   updateTiming: (nodeId, updates) => {
@@ -243,11 +344,27 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     set({ document: reorderRootNodes(get().document, orderedIds) });
   },
 
+  undo: () => {
+    if (undoStack.length === 0) return;
+    const prev = undoStack.pop()!;
+    redoStack.push(get().document);
+    set({ document: prev, canUndo: undoStack.length > 0, canRedo: true });
+  },
+
+  redo: () => {
+    if (redoStack.length === 0) return;
+    const next = redoStack.pop()!;
+    undoStack.push(get().document);
+    set({ document: next, canUndo: true, canRedo: redoStack.length > 0 });
+  },
+
   getNode: (nodeId) => {
     return get().document.nodes[nodeId];
   },
 
   reset: (doc) => {
-    set({ document: doc ?? createDocument('Untitled', 1920, 1080) });
+    undoStack.length = 0;
+    redoStack.length = 0;
+    set({ document: doc ?? createDocument('Untitled', 1920, 1080), canUndo: false, canRedo: false });
   },
 }));
