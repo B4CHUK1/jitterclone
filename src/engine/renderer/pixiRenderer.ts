@@ -4,6 +4,13 @@
  */
 
 import { Application, Container, Graphics, BlurFilter } from 'pixi.js';
+
+interface BlurFilterConfig {
+  strength: number;
+  quality: number;
+  padding: number;
+  repeatEdgePixels: boolean;
+}
 import type { RenderNode } from '@/engine/scene';
 import type { BlendMode, Effect, SceneNode } from '@/document/types';
 
@@ -21,6 +28,16 @@ const BLEND_MODE_MAP: Record<BlendMode, string> = {
   'difference': 'difference',
   'exclusion': 'exclusion',
 };
+
+
+export function getNodeBlurFilterConfig(radius: number, strokeWidth: number): BlurFilterConfig {
+  return {
+    strength: radius,
+    quality: Math.min(8, Math.max(4, Math.ceil(radius / 4))),
+    padding: Math.ceil(radius * 2 + strokeWidth),
+    repeatEdgePixels: false,
+  };
+}
 
 export interface RendererOptions {
   canvas: HTMLCanvasElement;
@@ -222,18 +239,16 @@ export class PixiRenderer {
     const blurEffect = effects.find((e): e is Extract<Effect, { type: 'blur' }> => e.type === 'blur');
     if (blurEffect && blurEffect.radius > 0) {
       const radius = blurEffect.radius;
-      // Quality scales with radius for smooth results
-      const quality = Math.min(8, Math.max(4, Math.ceil(radius / 4)));
-      // Generous padding: 4x radius ensures blur is never clipped
-      const padding = Math.ceil(radius * 4) + 2;
+      const strokeWidth = node.style?.stroke?.width ?? 0;
+      // Build the blur from the node alpha only and keep the filter surface
+      // tightly padded to the kernel so no rectangular filter backing appears.
+      const config = getNodeBlurFilterConfig(radius, strokeWidth);
       const blurFilter = new BlurFilter({
-        strength: radius,
-        quality,
-        padding,
+        strength: config.strength,
+        quality: config.quality,
+        padding: config.padding,
       });
-      // Keep transparent outside-shape pixels transparent.
-      // Repeating edge pixels causes a visible blurred rectangle.
-      (blurFilter as BlurFilter & { repeatEdgePixels?: boolean }).repeatEdgePixels = false;
+      (blurFilter as BlurFilter & { repeatEdgePixels?: boolean }).repeatEdgePixels = config.repeatEdgePixels;
       display.main.filters = [blurFilter];
       // Container must not also have a blur — only main gets it
       display.container.filters = [];
