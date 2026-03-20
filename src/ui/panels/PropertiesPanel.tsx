@@ -1,7 +1,6 @@
 import {
-  Timer,
   Diamond,
-} from 'lucide-react';
+} from '@/ui/components/icons';
 import { buildSceneGraph, findRenderNode } from '@/engine/scene';
 import {
   alignNodes,
@@ -15,7 +14,7 @@ import {
 import { getRenderNodeBounds } from '@/engine/interaction/snapEngine';
 import type { Document, BlendMode } from '@/document/types';
 import type { AnimatableProperty } from '@/document/types';
-import { evaluateNodeAtTime, hasKeyframeAtTime, isPropertyAnimated, globalToLocalTime } from '@/engine/animation';
+import { evaluateNodeAtTime, hasKeyframeAtTime, globalToLocalTime } from '@/engine/animation';
 import { ANIMATION_PRESETS } from '@/engine/animation/presets';
 import { useEditorStore, useDocumentStore, useTimelineStore } from '@/state';
 import { NumericInput } from '@/ui/components/NumericInput';
@@ -34,7 +33,6 @@ export function PropertiesPanel() {
   const updateStyle = useDocumentStore((s) => s.updateStyle);
   const updateComposition = useDocumentStore((s) => s.updateComposition);
   const setAnimatableValue = useDocumentStore((s) => s.setAnimatableValue);
-  const togglePropertyStopwatch = useDocumentStore((s) => s.togglePropertyStopwatch);
   const addKeyframeAtCurrentTime = useDocumentStore((s) => s.addKeyframeAtCurrentTime);
   const currentTime = useTimelineStore((s) => s.currentTime);
   const autoKeyframe = useTimelineStore((s) => s.autoKeyframe);
@@ -168,17 +166,6 @@ export function PropertiesPanel() {
     setAnimatableValue(nodeId, property, value, currentTime, autoKeyframe);
   };
 
-  const stopwatch = (property: AnimatableProperty) => (
-    <button
-      className={`${styles.iconButton} ${isPropertyAnimated(node, property) ? styles.iconButtonActive : ''}`}
-      type="button"
-      onClick={() => togglePropertyStopwatch(nodeId, property, currentTime)}
-      title={isPropertyAnimated(node, property) ? 'Disable animation' : 'Enable animation'}
-    >
-      <Timer size={14} />
-    </button>
-  );
-
   const keyButton = (property: AnimatableProperty) => (
     <button
       className={`${styles.iconButton} ${hasKeyframeAtTime(node, property, globalToLocalTime(currentTime, node)) ? styles.iconButtonActive : ''}`}
@@ -195,19 +182,19 @@ export function PropertiesPanel() {
       <div className={styles.section}>
         <div className={styles.sectionTitle}>Transform</div>
         <div className={styles.row}>
-          <div className={styles.field}><span className={styles.fieldLabel}>X</span><NumericInput className={styles.fieldInput} label="X position" value={t.x} onChange={(v) => setProperty('x', v)} />{stopwatch('x')}{keyButton('x')}</div>
-          <div className={styles.field}><span className={styles.fieldLabel}>Y</span><NumericInput className={styles.fieldInput} label="Y position" value={t.y} onChange={(v) => setProperty('y', v)} />{stopwatch('y')}{keyButton('y')}</div>
+          <div className={styles.field}><span className={styles.fieldLabel}>X</span><NumericInput className={styles.fieldInput} label="X position" value={t.x} onChange={(v) => setProperty('x', v)} />{keyButton('x')}</div>
+          <div className={styles.field}><span className={styles.fieldLabel}>Y</span><NumericInput className={styles.fieldInput} label="Y position" value={t.y} onChange={(v) => setProperty('y', v)} />{keyButton('y')}</div>
         </div>
         <div className={styles.row}>
           <div className={styles.field}><span className={styles.fieldLabel}>W</span><NumericInput className={styles.fieldInput} label="Width" value={t.width} onChange={(v) => updateTransform(nodeId, { width: v })} min={1} /></div>
           <div className={styles.field}><span className={styles.fieldLabel}>H</span><NumericInput className={styles.fieldInput} label="Height" value={t.height} onChange={(v) => updateTransform(nodeId, { height: v })} min={1} /></div>
         </div>
         <div className={styles.row}>
-          <div className={styles.field}><span className={styles.fieldLabel}>Rotation</span><NumericInput className={styles.fieldInput} label="Rotation" value={t.rotation} onChange={(v) => setProperty('rotation', v)} precision={1} />{stopwatch('rotation')}{keyButton('rotation')}</div>
+          <div className={styles.field}><span className={styles.fieldLabel}>Rotation</span><NumericInput className={styles.fieldInput} label="Rotation" value={t.rotation} onChange={(v) => setProperty('rotation', v)} precision={1} />{keyButton('rotation')}</div>
         </div>
         <div className={styles.row}>
-          <div className={styles.field}><span className={styles.fieldLabel}>Scale X</span><NumericInput className={styles.fieldInput} label="Scale X" value={t.scaleX} onChange={(v) => setProperty('scaleX', v)} precision={3} />{stopwatch('scaleX')}{keyButton('scaleX')}</div>
-          <div className={styles.field}><span className={styles.fieldLabel}>Scale Y</span><NumericInput className={styles.fieldInput} label="Scale Y" value={t.scaleY} onChange={(v) => setProperty('scaleY', v)} precision={3} />{stopwatch('scaleY')}{keyButton('scaleY')}</div>
+          <div className={styles.field}><span className={styles.fieldLabel}>Scale X</span><NumericInput className={styles.fieldInput} label="Scale X" value={t.scaleX} onChange={(v) => setProperty('scaleX', v)} precision={3} />{keyButton('scaleX')}</div>
+          <div className={styles.field}><span className={styles.fieldLabel}>Scale Y</span><NumericInput className={styles.fieldInput} label="Scale Y" value={t.scaleY} onChange={(v) => setProperty('scaleY', v)} precision={3} />{keyButton('scaleY')}</div>
         </div>
       </div>
 
@@ -224,7 +211,6 @@ export function PropertiesPanel() {
         <div className={styles.row}>
           <div className={styles.field}>
             <NumericInput className={styles.fieldInput} label="Opacity" value={s.opacity * 100} onChange={(v) => setProperty('opacity', v / 100)} min={0} max={100} />
-            {stopwatch('opacity')}
             {keyButton('opacity')}
           </div>
         </div>
