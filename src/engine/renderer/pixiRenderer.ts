@@ -197,10 +197,15 @@ export class PixiRenderer {
       const shadowColor = shadowEffect.color ?? '#000000';
       display.shadow.fill({ color: shadowColor, alpha: shadowEffect.opacity ?? 0.5 });
       display.shadow.position.set(shadowEffect.offsetX, shadowEffect.offsetY);
-      // Apply blur filter to shadow
+      // Apply blur filter to shadow — explicit padding prevents clipping
       const blurAmount = shadowEffect.blur ?? 0;
       if (blurAmount > 0) {
-        display.shadow.filters = [new BlurFilter({ strength: blurAmount, quality: 4 })];
+        const shadowFilter = new BlurFilter({
+          strength: blurAmount,
+          quality: 4,
+          padding: Math.ceil(blurAmount * 3),
+        });
+        display.shadow.filters = [shadowFilter];
       } else {
         display.shadow.filters = [];
       }
@@ -209,13 +214,22 @@ export class PixiRenderer {
       display.shadow.filters = [];
     }
 
-    // Handle gaussian blur on main shape
+    // Handle gaussian blur.
+    // Apply to the container so the blurred output can expand beyond the shape's bounds.
+    // Explicit padding prevents the blur from being clipped at the shape edges.
     const blurEffect = effects.find((e): e is Extract<Effect, { type: 'blur' }> => e.type === 'blur');
     if (blurEffect && blurEffect.radius > 0) {
-      display.main.filters = [new BlurFilter({ strength: blurEffect.radius, quality: 4 })];
+      const blurFilter = new BlurFilter({
+        strength: blurEffect.radius,
+        quality: 4,
+        padding: Math.ceil(blurEffect.radius * 3),
+      });
+      display.container.filters = [blurFilter];
     } else {
-      display.main.filters = [];
+      display.container.filters = [];
     }
+    // Never apply a separate blur to main — container-level is authoritative
+    display.main.filters = [];
   }
 
   private drawShapePath(gfx: Graphics, node: SceneNode): void {

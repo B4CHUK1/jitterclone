@@ -94,6 +94,11 @@ export function Canvas() {
   // Pen tool state
   const penPointsRef = useRef<{ x: number; y: number }[]>([]);
   const penActiveRef = useRef(false);
+  const penLastClickTimeRef = useRef(0);
+  const [penPreview, setPenPreview] = useState<{
+    points: { x: number; y: number }[];
+    cursor: { x: number; y: number } | null;
+  } | null>(null);
 
   const doc = useDocumentStore((s) => s.document);
   const currentTime = useTimelineStore((s) => s.currentTime);
@@ -285,6 +290,79 @@ export function Canvas() {
     [clientToScreen, selectedIds, getScene, worldToScreen, screenToWorld],
   );
 
+  // ── Finalize pen path: create node from accumulated anchor points ──
+  const finalizePenPath = useCallback(() => {
+    const points = penPointsRef.current;
+    penActiveRef.current = false;
+    penPointsRef.current = [];
+    setPenPreview(null);
+    setInteractionCursor(null);
+    penLastClickTimeRef.current = 0;
+
+    if (points.length >= 2) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of points) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
+      const w = Math.max(1, maxX - minX);
+      const h = Math.max(1, maxY - minY);
+      const normalizedPoints = points.map((p) => ({
+        x: (p.x - minX) / w,
+        y: (p.y - minY) / h,
+      }));
+      const id = addNode('path', {
+        transform: {
+          ...defaultTransform(),
+          x: minX + w / 2,
+          y: minY + h / 2,
+          width: w,
+          height: h,
+        },
+        pathData: normalizedPoints,
+        style: {
+          fill: { color: '#5B8DEF', opacity: 1 },
+          stroke: { color: '#5B8DEF', width: 2, opacity: 1 },
+          opacity: 1,
+          cornerRadius: 0,
+          effects: [],
+          blendMode: 'normal' as const,
+        },
+      } as Partial<import('@/document/types').SceneNode>);
+      select(id);
+    }
+    setTool('select');
+  }, [addNode, select, setTool]);
+
+  // ── Pen tool keyboard: Enter = finalize, Escape = cancel ──
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && penActiveRef.current) {
+        penActiveRef.current = false;
+        penPointsRef.current = [];
+        setPenPreview(null);
+        setInteractionCursor(null);
+        setTool('select');
+      }
+      if (e.key === 'Enter' && penActiveRef.current) {
+        finalizePenPath();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [finalizePenPath, setTool]);
+
+  // ── Cancel pen path when switching tools ──
+  useEffect(() => {
+    if (activeTool !== 'pen' && penActiveRef.current) {
+      penActiveRef.current = false;
+      penPointsRef.current = [];
+      setPenPreview(null);
+    }
+  }, [activeTool]);
+
   const startHandleInteraction = useCallback(
     (e: React.PointerEvent, handle: string) => {
       e.stopPropagation();
@@ -356,14 +434,38 @@ export function Canvas() {
   // ── POINTER DOWN on canvas ──
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
-      // Pen tool drawing
+      // Pen tool: click-to-place anchor points
       if (e.button === 0 && activeTool === 'pen') {
+        e.preventDefault();
         const screen = clientToScreen(e.clientX, e.clientY);
         const world = screenToWorld(screen);
-        penPointsRef.current = [world];
+
+        // Double-click: finalize path
+        const now = Date.now();
+        if (penActiveRef.current && penPointsRef.current.length >= 2 && now - penLastClickTimeRef.current < 350) {
+          finalizePenPath();
+          return;
+        }
+        penLastClickTimeRef.current = now;
+
+        // Click near first anchor point: close and finalize path
+        if (penActiveRef.current && penPointsRef.current.length >= 3) {
+          const firstPt = penPointsRef.current[0]!;
+          const firstScreen = worldToScreen(firstPt);
+          const containerRect = containerRef.current?.getBoundingClientRect();
+          if (containerRect) {
+            const scrX = e.clientX - containerRect.left;
+            const scrY = e.clientY - containerRect.top;
+            if (Math.sqrt((scrX - firstScreen.x) ** 2 + (scrY - firstScreen.y) ** 2) < 10) {
+              finalizePenPath();
+              return;
+            }
+          }
+        }
+
         penActiveRef.current = true;
-        pointerIdRef.current = e.pointerId;
-        containerRef.current?.setPointerCapture(e.pointerId);
+        penPointsRef.current = [...penPointsRef.current, world];
+        setPenPreview({ points: [...penPointsRef.current], cursor: world });
         setInteractionCursor('crosshair');
         return;
       }
@@ -423,24 +525,22 @@ export function Canvas() {
 
       tick();
     },
-    [activeTool, clientToScreen, screenToWorld, getScene, deselectAll, tick, selectedIds, worldToScreen, startHandleInteraction],
+    [activeTool, clientToScreen, screenToWorld, getScene, deselectAll, tick, selectedIds, worldToScreen, startHandleInteraction, finalizePenPath],
   );
 
   // ── POINTER MOVE ──
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
-      // Pen tool drawing
-      if (penActiveRef.current) {
+      // Pen tool: update cursor preview position
+      if (activeTool === 'pen') {
         const screen = clientToScreen(e.clientX, e.clientY);
         const world = screenToWorld(screen);
-        // Only add point if it's far enough from the last point (smoothing)
-        const last = penPointsRef.current[penPointsRef.current.length - 1];
-        if (last) {
-          const dx = world.x - last.x;
-          const dy = world.y - last.y;
-          if (dx * dx + dy * dy > 4) { // minimum 2px distance in world space
-            penPointsRef.current.push(world);
-          }
+        if (penActiveRef.current) {
+          setPenPreview((prev) =>
+            prev
+              ? { ...prev, cursor: world }
+              : { points: penPointsRef.current, cursor: world },
+          );
         }
         return;
       }
@@ -648,55 +748,8 @@ export function Canvas() {
   // ── POINTER UP ──
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
-      // Pen tool: finalize path
-      if (penActiveRef.current) {
-        penActiveRef.current = false;
-        setInteractionCursor(null);
-        const points = penPointsRef.current;
-        if (points.length >= 2) {
-          // Compute bounding box
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          for (const p of points) {
-            if (p.x < minX) minX = p.x;
-            if (p.y < minY) minY = p.y;
-            if (p.x > maxX) maxX = p.x;
-            if (p.y > maxY) maxY = p.y;
-          }
-          const w = Math.max(1, maxX - minX);
-          const h = Math.max(1, maxY - minY);
-          // Normalize points to [0,1] space
-          const normalizedPoints = points.map((p) => ({
-            x: (p.x - minX) / w,
-            y: (p.y - minY) / h,
-          }));
-          const id = addNode('path', {
-            transform: {
-              ...defaultTransform(),
-              x: minX + w / 2,
-              y: minY + h / 2,
-              width: w,
-              height: h,
-            },
-            pathData: normalizedPoints,
-            style: {
-              fill: { color: '#5B8DEF', opacity: 1 },
-              stroke: { color: '#5B8DEF', width: 3, opacity: 1 },
-              opacity: 1,
-              cornerRadius: 0,
-              effects: [],
-              blendMode: 'normal' as const,
-            },
-          } as Partial<import('@/document/types').SceneNode>);
-          select(id);
-          setTool('select');
-        }
-        penPointsRef.current = [];
-        if (e.currentTarget && pointerIdRef.current != null) {
-          try {
-            (e.currentTarget as HTMLElement).releasePointerCapture(pointerIdRef.current);
-          } catch { /* */ }
-        }
-        pointerIdRef.current = null;
+      // Pen tool is click-based — nothing to do on pointer up
+      if (activeTool === 'pen') {
         return;
       }
 
@@ -719,7 +772,7 @@ export function Canvas() {
 
       resetInteraction(e.pointerId);
     },
-    [select, toggleSelect, resetInteraction],
+    [activeTool, select, toggleSelect, resetInteraction],
   );
 
   // ── Pointer cancel / window blur — safety cleanup ──
@@ -785,6 +838,70 @@ export function Canvas() {
         worldToScreen={worldToScreen}
       />
       <RotateTooltipOverlay tooltip={rotateTooltip} />
+
+      {/* ── Pen tool preview overlay ── */}
+      {activeTool === 'pen' && penPreview && (
+        <svg
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none',
+            overflow: 'visible',
+          }}
+        >
+          {/* Committed path segments */}
+          {penPreview.points.length > 1 && (
+            <polyline
+              points={penPreview.points
+                .map((p) => {
+                  const s = worldToScreen(p);
+                  return `${s.x},${s.y}`;
+                })
+                .join(' ')}
+              fill="none"
+              stroke="#4dabf7"
+              strokeWidth="1.5"
+            />
+          )}
+          {/* Live preview: dashed segment from last point to cursor */}
+          {penPreview.points.length > 0 && penPreview.cursor && (() => {
+            const last = penPreview.points[penPreview.points.length - 1]!;
+            const lastSc = worldToScreen(last);
+            const curSc = worldToScreen(penPreview.cursor);
+            return (
+              <line
+                x1={lastSc.x}
+                y1={lastSc.y}
+                x2={curSc.x}
+                y2={curSc.y}
+                stroke="#4dabf7"
+                strokeWidth="1"
+                strokeDasharray="5 3"
+                opacity="0.65"
+              />
+            );
+          })()}
+          {/* Anchor point handles */}
+          {penPreview.points.map((p, i) => {
+            const s = worldToScreen(p);
+            const isFirst = i === 0 && penPreview.points.length >= 3;
+            return (
+              <rect
+                key={i}
+                x={s.x - 4}
+                y={s.y - 4}
+                width={8}
+                height={8}
+                fill={isFirst ? '#69db7c' : '#ffffff'}
+                stroke={isFirst ? '#2f9e44' : '#4dabf7'}
+                strokeWidth="1.5"
+              />
+            );
+          })}
+        </svg>
+      )}
     </div>
   );
 }

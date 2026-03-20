@@ -279,10 +279,11 @@
 /* ── Property label row ── */
 .propertyLabelCell {
   display: grid;
-  grid-template-columns: minmax(74px, 1fr) 30px 24px 24px 24px 56px;
+  grid-template-columns: 1fr 22px 22px 22px;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   padding-left: 28px;
+  padding-right: 4px;
 }
 
 .propertyTimeCell {
@@ -412,6 +413,22 @@
   pointer-events: none;
   z-index: 4;
   opacity: 0.7;
+}
+
+/* ── Box select rectangle ── */
+.boxSelectRect {
+  position: absolute;
+  background: color-mix(in srgb, var(--color-selection) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-selection) 55%, transparent);
+  pointer-events: none;
+  z-index: 8;
+  border-radius: 1px;
+}
+
+/* ── Keyframe button active state (keyframe exists at current time) ── */
+.keyframeButtonActive {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-border));
 }
 
 /* ── Layer reorder drop indicator ── */
