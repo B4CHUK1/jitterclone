@@ -15,7 +15,6 @@ import {
   buildTimelineLayout,
   TIMELINE_LABEL_WIDTH,
   TIMELINE_RULER_HEIGHT,
-  TIMELINE_LAYER_HEIGHT,
   TIMELINE_ROW_GAP,
 } from './timelineLayout';
 import { createTimelineTimeScale } from './timelineMapping';
@@ -50,7 +49,6 @@ export function TimelinePanel() {
   const toggleAutoKeyframe = useTimelineStore((s) => s.toggleAutoKeyframe);
   const timeScaleValue = useTimelineStore((s) => s.timeScale);
   const setTimeScale = useTimelineStore((s) => s.setTimeScale);
-  const scrollX = useTimelineStore((s) => s.scrollX);
   const setScrollX = useTimelineStore((s) => s.setScrollX);
   const selectedKeyframes = useTimelineStore((s) => s.selectedKeyframes);
   const setSelectedKeyframes = useTimelineStore((s) => s.setSelectedKeyframes);
