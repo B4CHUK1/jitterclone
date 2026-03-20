@@ -45,7 +45,6 @@ const SNAP_PX = 8;
 
 export function TimelinePanel() {
   const document = useDocumentStore((s) => s.document);
-  const moveKeyframe = useDocumentStore((s) => s.moveKeyframe);
   const moveKeyframes = useDocumentStore((s) => s.moveKeyframes);
   const removeKeyframe = useDocumentStore((s) => s.removeKeyframe);
   const setKeyframe = useDocumentStore((s) => s.setKeyframe);
@@ -708,7 +707,6 @@ export function TimelinePanel() {
                 onSeek={setCurrentTime}
                 onAddKey={() => addKeyframeAtCurrentTime(row.node.id, row.property, currentTime)}
                 xForTime={timeScale.toX}
-                moveKeyframe={moveKeyframe}
                 moveKeyframes={moveKeyframes}
                 setSelectedKeyframes={setSelectedKeyframes}
                 selectedKeyframes={selectedKeyframes}
@@ -906,7 +904,6 @@ function PropertyRow({
   xForTime,
   top,
   height,
-  moveKeyframe,
   moveKeyframes,
   selectedKeyframes,
   setSelectedKeyframes,
@@ -925,7 +922,6 @@ function PropertyRow({
   xForTime: (time: number) => number;
   top: number;
   height: number;
-  moveKeyframe: (nodeId: string, property: AnimatableProperty, fromLocalTime: number, toLocalTime: number) => void;
   moveKeyframes: (moves: Array<{ nodeId: string; property: AnimatableProperty; fromLocalTime: number; toLocalTime: number }>) => void;
   getNode: (nodeId: string) => SceneNode | undefined;
   selectedKeyframes: { nodeId: string; property: AnimatableProperty; time: number }[];
