@@ -31,6 +31,7 @@ import {
   type SnapGuide,
   type WorldBounds,
 } from '@/engine/interaction/snapEngine';
+import { resolveResizeSnap } from '@/engine/interaction/resizeSnap';
 import { useDocumentStore, useEditorStore, useViewportStore } from '@/state';
 import { SelectionOverlay } from '@/ui/overlays/SelectionOverlay';
 import { SnapOverlay } from '@/ui/overlays/SnapOverlay';
@@ -418,7 +419,10 @@ export function Canvas() {
       if (phaseRef.current === 'resizing' && resizeStateRef.current) {
         const mods: ResizeModifiers = { shift: e.shiftKey, alt: e.altKey };
         const updates = updateResize(resizeStateRef.current, world, mods);
-        const snapped = applyResizeSnap(
+        const snapped = resolveResizeSnap(
+          resizeStateRef.current,
+          world,
+          mods,
           updates,
           resizeStaticBoundsRef.current,
           getCanvasBounds(doc.width, doc.height),
@@ -670,47 +674,6 @@ function mergeBounds(boundsList: WorldBounds[]): WorldBounds {
     bottom,
     centerX: (left + right) / 2,
     centerY: (top + bottom) / 2,
-  };
-}
-
-function applyResizeSnap(
-  updates: Partial<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  }>,
-  staticBounds: readonly WorldBounds[],
-  canvasBounds: WorldBounds,
-  threshold: number,
-): { transform: typeof updates; guides: SnapGuide[] } {
-  if (
-    updates.x == null
-    || updates.y == null
-    || updates.width == null
-    || updates.height == null
-    || updates.width <= 0
-    || updates.height <= 0
-  ) {
-    return { transform: updates, guides: [] };
-  }
-
-  const movingBounds: WorldBounds = {
-    left: updates.x,
-    right: updates.x + updates.width,
-    top: updates.y,
-    bottom: updates.y + updates.height,
-    centerX: updates.x + updates.width / 2,
-    centerY: updates.y + updates.height / 2,
-  };
-  const snap = resolveBoundsSnapping(movingBounds, staticBounds, canvasBounds, threshold);
-  return {
-    transform: {
-      ...updates,
-      x: updates.x + snap.dx,
-      y: updates.y + snap.dy,
-    },
-    guides: snap.guides,
   };
 }
 
