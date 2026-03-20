@@ -825,6 +825,7 @@ export function Canvas() {
       tick,
       currentTime,
       autoKeyframe,
+      activeTool,
     ],
   );
 
