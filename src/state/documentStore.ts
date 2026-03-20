@@ -1,6 +1,11 @@
 /**
  * Document store — the source of truth for the scene graph.
  * Holds the serializable document and exposes mutation actions.
+ *
+ * KEYFRAME CONVENTION:
+ * All keyframe times are LOCAL to the clip (relative to node.startTime).
+ * When the user interacts at a global time, we convert:
+ *   localTime = globalTime - node.startTime
  */
 
 import { create } from 'zustand';
@@ -23,9 +28,15 @@ import {
   setNodeKeyframe,
   removeNodeKeyframe,
   setNodePropertyAnimation,
+  updateNodeTiming,
 } from '@/document/operations';
 import type { Transform } from '@/engine/transform';
-import { applyStaticValueToNode, evaluateNodeAtTime } from '@/engine/animation';
+import {
+  applyStaticValueToNode,
+  evaluateNodeAtTime,
+  globalToLocalTime,
+  clampKeyframeTime,
+} from '@/engine/animation';
 
 interface DocumentState {
   document: Document;
@@ -40,23 +51,36 @@ interface DocumentState {
   updateComposition: (
     updates: Partial<Pick<Document['composition'], 'name' | 'width' | 'height' | 'background' | 'duration' | 'fps'>>,
   ) => void;
-  setKeyframe: (nodeId: string, property: AnimatableProperty, time: number, value: number) => void;
-  removeKeyframe: (nodeId: string, property: AnimatableProperty, time: number) => void;
+
+  /** Set a keyframe at LOCAL time */
+  setKeyframe: (nodeId: string, property: AnimatableProperty, localTime: number, value: number) => void;
+  /** Remove a keyframe at LOCAL time */
+  removeKeyframe: (nodeId: string, property: AnimatableProperty, localTime: number) => void;
+  /** Move a keyframe from one LOCAL time to another LOCAL time */
   moveKeyframe: (
     nodeId: string,
     property: AnimatableProperty,
-    fromTime: number,
-    toTime: number,
+    fromLocalTime: number,
+    toLocalTime: number,
   ) => void;
+  /**
+   * Set an animatable value. If the property is animated, inserts a keyframe
+   * at the given GLOBAL time (converted to local internally).
+   */
   setAnimatableValue: (
     nodeId: string,
     property: AnimatableProperty,
     value: number,
-    time: number,
-    _autoKeyframe: boolean,
+    globalTime: number,
+    autoKeyframe: boolean,
   ) => void;
-  togglePropertyStopwatch: (nodeId: string, property: AnimatableProperty, time: number) => void;
-  addKeyframeAtCurrentTime: (nodeId: string, property: AnimatableProperty, time: number) => void;
+  togglePropertyStopwatch: (nodeId: string, property: AnimatableProperty, globalTime: number) => void;
+  /** Add a keyframe at the current GLOBAL time */
+  addKeyframeAtCurrentTime: (nodeId: string, property: AnimatableProperty, globalTime: number) => void;
+
+  /** Update clip timing (startTime/endTime) */
+  updateTiming: (nodeId: string, updates: { startTime?: number; endTime?: number }) => void;
+
   getNode: (nodeId: string) => SceneNode | undefined;
   reset: (doc?: Document) => void;
 }
@@ -64,9 +88,9 @@ interface DocumentState {
 function getEvaluatedAnimatableValue(
   node: SceneNode,
   property: AnimatableProperty,
-  time: number,
+  globalTime: number,
 ): number {
-  const evaluated = evaluateNodeAtTime(node, time);
+  const evaluated = evaluateNodeAtTime(node, globalTime);
   if (property === 'opacity') return evaluated.style.opacity;
   return evaluated.transform[property as keyof Transform] as number;
 }
@@ -99,38 +123,49 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   updateProps: (nodeId, updates) => {
     set({ document: updateNodeProps(get().document, nodeId, updates) });
   },
+
   updateComposition: (updates) => {
     set({ document: updateComposition(get().document, updates) });
   },
-  setKeyframe: (nodeId, property, time, value) => {
+
+  setKeyframe: (nodeId, property, localTime, value) => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node) return;
+    const clamped = clampKeyframeTime(localTime, node);
     set({
-      document: setNodeKeyframe(get().document, nodeId, property, { time, value }),
+      document: setNodeKeyframe(doc, nodeId, property, { time: clamped, value }),
     });
   },
-  removeKeyframe: (nodeId, property, time) => {
+
+  removeKeyframe: (nodeId, property, localTime) => {
     set({
-      document: removeNodeKeyframe(get().document, nodeId, property, time),
+      document: removeNodeKeyframe(get().document, nodeId, property, localTime),
     });
   },
-  moveKeyframe: (nodeId, property, fromTime, toTime) => {
+
+  moveKeyframe: (nodeId, property, fromLocalTime, toLocalTime) => {
     const doc = get().document;
     const node = doc.nodes[nodeId];
     if (!node) return;
     const keyframe = node.animation.properties[property].keyframes.find(
-      (key) => Math.abs(key.time - fromTime) < 1e-6,
+      (key) => Math.abs(key.time - fromLocalTime) < 1e-6,
     );
     if (!keyframe) return;
-    let nextDoc = removeNodeKeyframe(doc, nodeId, property, fromTime);
-    nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: toTime, value: keyframe.value });
+    const clamped = clampKeyframeTime(toLocalTime, node);
+    let nextDoc = removeNodeKeyframe(doc, nodeId, property, fromLocalTime);
+    nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: clamped, value: keyframe.value });
     set({ document: nextDoc });
   },
-  setAnimatableValue: (nodeId, property, value, time, _autoKeyframe) => {
+
+  setAnimatableValue: (nodeId, property, value, globalTime, _autoKeyframe) => {
     const doc = get().document;
     const node = doc.nodes[nodeId];
     if (!node) return;
     const propertyState = node.animation.properties[property];
 
-    let nextDoc = {
+    // Always update the static value
+    let nextDoc: Document = {
       ...doc,
       nodes: {
         ...doc.nodes,
@@ -138,39 +173,37 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       },
     };
 
-    const shouldKey = propertyState.animated;
-    if (shouldKey) {
-      if (!propertyState.animated) {
-        const baseValue = getEvaluatedAnimatableValue(node, property, time);
-        nextDoc = setNodePropertyAnimation(nextDoc, nodeId, property, {
-          animated: true,
-          keyframes: [{ time, value: baseValue }],
-        });
-      }
-      nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time, value });
+    // If the property is animated, insert/update keyframe at this time
+    if (propertyState.animated) {
+      const localTime = clampKeyframeTime(globalToLocalTime(globalTime, node), node);
+      nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: localTime, value });
     }
 
     set({ document: nextDoc });
   },
-  togglePropertyStopwatch: (nodeId, property, time) => {
+
+  togglePropertyStopwatch: (nodeId, property, globalTime) => {
     const doc = get().document;
     const node = doc.nodes[nodeId];
     if (!node) return;
     const propertyState = node.animation.properties[property];
 
     if (!propertyState.animated) {
-      const value = getEvaluatedAnimatableValue(node, property, time);
+      // Enable animation: create first keyframe at current local time
+      const value = getEvaluatedAnimatableValue(node, property, globalTime);
+      const localTime = clampKeyframeTime(globalToLocalTime(globalTime, node), node);
       let nextDoc = setNodePropertyAnimation(doc, nodeId, property, {
         animated: true,
         keyframes: [],
       });
-      nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time, value });
+      nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: localTime, value });
       set({ document: nextDoc });
       return;
     }
 
-    const value = getEvaluatedAnimatableValue(node, property, time);
-    let nextDoc = {
+    // Disable animation: bake current value to static
+    const value = getEvaluatedAnimatableValue(node, property, globalTime);
+    let nextDoc: Document = {
       ...doc,
       nodes: {
         ...doc.nodes,
@@ -183,17 +216,23 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     });
     set({ document: nextDoc });
   },
-  addKeyframeAtCurrentTime: (nodeId, property, time) => {
+
+  addKeyframeAtCurrentTime: (nodeId, property, globalTime) => {
     const doc = get().document;
     const node = doc.nodes[nodeId];
     if (!node) return;
-    const value = getEvaluatedAnimatableValue(node, property, time);
+    const value = getEvaluatedAnimatableValue(node, property, globalTime);
+    const localTime = clampKeyframeTime(globalToLocalTime(globalTime, node), node);
     let nextDoc = doc;
     if (!node.animation.properties[property].animated) {
       nextDoc = setNodePropertyAnimation(nextDoc, nodeId, property, { animated: true, keyframes: [] });
     }
-    nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time, value });
+    nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: localTime, value });
     set({ document: nextDoc });
+  },
+
+  updateTiming: (nodeId, updates) => {
+    set({ document: updateNodeTiming(get().document, nodeId, updates) });
   },
 
   getNode: (nodeId) => {
