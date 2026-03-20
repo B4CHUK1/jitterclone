@@ -91,6 +91,8 @@ interface DocumentState {
   applyPreset: (nodeId: string, preset: AnimationPreset, globalTime: number) => void;
   /** Add an effect to a node */
   addEffect: (nodeId: string, effect: Effect) => void;
+  /** Update an effect at index */
+  updateEffect: (nodeId: string, index: number, effect: Effect) => void;
   /** Remove an effect by index */
   removeEffect: (nodeId: string, index: number) => void;
 
@@ -329,6 +331,14 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     }));
   },
 
+  updateEffect: (nodeId, index, effect) => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node) return;
+    const effects = node.style.effects.map((e, i) => (i === index ? effect : e));
+    set({ document: updateNodeStyle(doc, nodeId, { effects }) });
+  },
+
   removeEffect: (nodeId, index) => {
     const doc = get().document;
     const node = doc.nodes[nodeId];
@@ -342,7 +352,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   },
 
   reorderLayers: (orderedIds) => {
-    set({ document: reorderRootNodes(get().document, orderedIds) });
+    withUndo(set, get, reorderRootNodes(get().document, orderedIds));
   },
 
   undo: () => {

@@ -38,6 +38,7 @@ import { evaluateDocumentAtTime } from '@/engine/animation';
 import { SelectionOverlay } from '@/ui/overlays/SelectionOverlay';
 import { SnapOverlay } from '@/ui/overlays/SnapOverlay';
 import { RotateTooltipOverlay } from '@/ui/overlays/RotateTooltipOverlay';
+import { defaultTransform } from '@/engine/transform/transform';
 import { ROTATE_CURSOR } from '@/ui/cursors';
 import styles from './Canvas.module.css';
 
@@ -90,17 +91,23 @@ export function Canvas() {
   const [, setRenderTick] = useState(0);
   const tick = useCallback(() => setRenderTick((t) => t + 1), []);
 
+  // Pen tool state
+  const penPointsRef = useRef<{ x: number; y: number }[]>([]);
+  const penActiveRef = useRef(false);
+
   const doc = useDocumentStore((s) => s.document);
   const currentTime = useTimelineStore((s) => s.currentTime);
   const evaluatedDoc = evaluateDocumentAtTime(doc, currentTime);
   const updateTransform = useDocumentStore((s) => s.updateTransform);
   const setAnimatableValue = useDocumentStore((s) => s.setAnimatableValue);
+  const addNode = useDocumentStore((s) => s.addNode);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const select = useEditorStore((s) => s.select);
   const selectMultiple = useEditorStore((s) => s.selectMultiple);
   const toggleSelect = useEditorStore((s) => s.toggleSelect);
   const deselectAll = useEditorStore((s) => s.deselectAll);
   const activeTool = useEditorStore((s) => s.activeTool);
+  const setTool = useEditorStore((s) => s.setTool);
   const autoKeyframe = useTimelineStore((s) => s.autoKeyframe);
 
   const zoom = useViewportStore((s) => s.zoom);
@@ -349,6 +356,18 @@ export function Canvas() {
   // ── POINTER DOWN on canvas ──
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
+      // Pen tool drawing
+      if (e.button === 0 && activeTool === 'pen') {
+        const screen = clientToScreen(e.clientX, e.clientY);
+        const world = screenToWorld(screen);
+        penPointsRef.current = [world];
+        penActiveRef.current = true;
+        pointerIdRef.current = e.pointerId;
+        containerRef.current?.setPointerCapture(e.pointerId);
+        setInteractionCursor('crosshair');
+        return;
+      }
+
       // Middle button or Alt+click = pan
       if (e.button === 1 || (e.button === 0 && (activeTool === 'hand' || e.altKey))) {
         phaseRef.current = 'panning';
@@ -410,6 +429,22 @@ export function Canvas() {
   // ── POINTER MOVE ──
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
+      // Pen tool drawing
+      if (penActiveRef.current) {
+        const screen = clientToScreen(e.clientX, e.clientY);
+        const world = screenToWorld(screen);
+        // Only add point if it's far enough from the last point (smoothing)
+        const last = penPointsRef.current[penPointsRef.current.length - 1];
+        if (last) {
+          const dx = world.x - last.x;
+          const dy = world.y - last.y;
+          if (dx * dx + dy * dy > 4) { // minimum 2px distance in world space
+            penPointsRef.current.push(world);
+          }
+        }
+        return;
+      }
+
       const phase = phaseRef.current;
 
       // Always update hover cursor when idle
@@ -613,6 +648,58 @@ export function Canvas() {
   // ── POINTER UP ──
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
+      // Pen tool: finalize path
+      if (penActiveRef.current) {
+        penActiveRef.current = false;
+        setInteractionCursor(null);
+        const points = penPointsRef.current;
+        if (points.length >= 2) {
+          // Compute bounding box
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          for (const p of points) {
+            if (p.x < minX) minX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y > maxY) maxY = p.y;
+          }
+          const w = Math.max(1, maxX - minX);
+          const h = Math.max(1, maxY - minY);
+          // Normalize points to [0,1] space
+          const normalizedPoints = points.map((p) => ({
+            x: (p.x - minX) / w,
+            y: (p.y - minY) / h,
+          }));
+          const id = addNode('path', {
+            transform: {
+              ...defaultTransform(),
+              x: minX + w / 2,
+              y: minY + h / 2,
+              width: w,
+              height: h,
+            },
+            pathData: normalizedPoints,
+            style: {
+              fill: { color: '#5B8DEF', opacity: 1 },
+              stroke: { color: '#5B8DEF', width: 3, opacity: 1 },
+              opacity: 1,
+              cornerRadius: 0,
+              effects: [],
+              blendMode: 'normal' as const,
+            },
+          } as Partial<import('@/document/types').SceneNode>);
+          select(id);
+          setTool('select');
+        }
+        penPointsRef.current = [];
+        if (e.currentTarget && pointerIdRef.current != null) {
+          try {
+            (e.currentTarget as HTMLElement).releasePointerCapture(pointerIdRef.current);
+          } catch { /* */ }
+        }
+        pointerIdRef.current = null;
+        return;
+      }
+
       const phase = phaseRef.current;
 
       // If still in pending-drag (threshold not crossed) → treat as click

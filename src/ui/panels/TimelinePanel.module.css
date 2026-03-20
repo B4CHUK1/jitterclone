@@ -20,18 +20,57 @@
   user-select: none;
 }
 
+/* ── Transport buttons ── */
+.transportButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.transportButton:hover {
+  background: color-mix(in srgb, var(--color-bg-tertiary) 70%, white);
+  color: var(--color-text-primary);
+}
+
+.transportButtonPlay {
+  background: var(--color-accent-dim);
+  color: var(--color-accent);
+}
+
+.transportButtonPlay:hover {
+  background: var(--color-accent);
+  color: white;
+}
+
+.transportButtonActive {
+  background: color-mix(in srgb, var(--color-accent) 25%, var(--color-bg-tertiary));
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
 .playButton,
 .miniButton,
 .stopwatchButton,
 .expandButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
   border-radius: 4px;
-  padding: 3px 8px;
+  padding: 3px 6px;
   font-size: 11px;
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background 0.1s, color 0.1s;
 }
 
 .playButton:hover,
@@ -39,6 +78,7 @@
 .stopwatchButton:hover,
 .expandButton:hover {
   background: color-mix(in srgb, var(--color-bg-tertiary) 70%, white);
+  color: var(--color-text-primary);
 }
 
 .playButton:active,
@@ -46,6 +86,10 @@
 .stopwatchButton:active,
 .expandButton:active {
   background: color-mix(in srgb, var(--color-bg-tertiary) 50%, white);
+}
+
+.stopwatchActive {
+  color: var(--color-accent);
 }
 
 .playButton {

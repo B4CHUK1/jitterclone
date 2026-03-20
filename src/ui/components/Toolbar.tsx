@@ -2,16 +2,29 @@ import { useEditorStore, useViewportStore, useDocumentStore } from '@/state';
 import type { EditorTool } from '@/state/editorStore';
 import type { NodeType } from '@/document/types';
 import { defaultTransform } from '@/engine/transform/transform';
+import {
+  MousePointer2,
+  Square,
+  Circle,
+  Pentagon,
+  Star,
+  Minus,
+  Hand,
+  PenTool,
+  Undo2,
+  Redo2,
+} from 'lucide-react';
 import styles from './Toolbar.module.css';
 
-const tools: { id: EditorTool; label: string; shortcut: string }[] = [
-  { id: 'select', label: 'V', shortcut: 'V' },
-  { id: 'rectangle', label: 'R', shortcut: 'R' },
-  { id: 'ellipse', label: 'O', shortcut: 'O' },
-  { id: 'polygon', label: 'P', shortcut: 'P' },
-  { id: 'star', label: 'S', shortcut: 'S' },
-  { id: 'line', label: 'L', shortcut: 'L' },
-  { id: 'hand', label: 'H', shortcut: 'H' },
+const tools: { id: EditorTool; label: string; shortcut: string; icon: React.ReactNode }[] = [
+  { id: 'select', label: 'Select', shortcut: 'V', icon: <MousePointer2 size={16} /> },
+  { id: 'rectangle', label: 'Rectangle', shortcut: 'R', icon: <Square size={16} /> },
+  { id: 'ellipse', label: 'Ellipse', shortcut: 'O', icon: <Circle size={16} /> },
+  { id: 'polygon', label: 'Polygon', shortcut: 'P', icon: <Pentagon size={16} /> },
+  { id: 'star', label: 'Star', shortcut: 'S', icon: <Star size={16} /> },
+  { id: 'line', label: 'Line', shortcut: 'L', icon: <Minus size={16} /> },
+  { id: 'pen', label: 'Pen', shortcut: 'D', icon: <PenTool size={16} /> },
+  { id: 'hand', label: 'Hand', shortcut: 'H', icon: <Hand size={16} /> },
 ];
 
 const SHAPE_TOOLS: EditorTool[] = ['rectangle', 'ellipse', 'polygon', 'star', 'line'];
@@ -80,9 +93,9 @@ export function Toolbar() {
                 setTool(tool.id);
               }
             }}
-            title={`${tool.id} (${tool.shortcut})`}
+            title={`${tool.label} (${tool.shortcut})`}
           >
-            {tool.label}
+            {tool.icon}
           </button>
         ))}
       </div>
@@ -95,7 +108,7 @@ export function Toolbar() {
           disabled={!canUndo}
           title="Undo (Ctrl+Z)"
         >
-          Undo
+          <Undo2 size={16} />
         </button>
         <button
           className={styles.toolButton}
@@ -103,7 +116,7 @@ export function Toolbar() {
           disabled={!canRedo}
           title="Redo (Ctrl+Y)"
         >
-          Redo
+          <Redo2 size={16} />
         </button>
       </div>
 

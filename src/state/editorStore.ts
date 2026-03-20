@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 
-export type EditorTool = 'select' | 'rectangle' | 'ellipse' | 'polygon' | 'star' | 'line' | 'hand';
+export type EditorTool = 'select' | 'rectangle' | 'ellipse' | 'polygon' | 'star' | 'line' | 'hand' | 'pen';
 
 export type InteractionMode =
   | 'idle'
