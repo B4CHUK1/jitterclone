@@ -4,7 +4,13 @@
  */
 
 import { create } from 'zustand';
-import type { Document, NodeType, NodeStyle, SceneNode } from '@/document/types';
+import type {
+  AnimatableProperty,
+  Document,
+  NodeType,
+  NodeStyle,
+  SceneNode,
+} from '@/document/types';
 import { createDocument } from '@/document/types';
 import {
   addNode,
@@ -13,6 +19,9 @@ import {
   updateManyNodeTransforms,
   updateNodeStyle,
   updateNodeProps,
+  updateComposition,
+  setNodeKeyframe,
+  removeNodeKeyframe,
 } from '@/document/operations';
 import type { Transform } from '@/engine/transform';
 
@@ -26,6 +35,11 @@ interface DocumentState {
   updateTransforms: (updates: Map<string, Partial<Transform>>) => void;
   updateStyle: (nodeId: string, updates: Partial<NodeStyle>) => void;
   updateProps: (nodeId: string, updates: Partial<Pick<SceneNode, 'name' | 'visible' | 'locked'>>) => void;
+  updateComposition: (
+    updates: Partial<Pick<Document['composition'], 'name' | 'width' | 'height' | 'background' | 'duration' | 'fps'>>,
+  ) => void;
+  setKeyframe: (nodeId: string, property: AnimatableProperty, time: number, value: number) => void;
+  removeKeyframe: (nodeId: string, property: AnimatableProperty, time: number) => void;
   getNode: (nodeId: string) => SceneNode | undefined;
   reset: (doc?: Document) => void;
 }
@@ -57,6 +71,19 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   updateProps: (nodeId, updates) => {
     set({ document: updateNodeProps(get().document, nodeId, updates) });
+  },
+  updateComposition: (updates) => {
+    set({ document: updateComposition(get().document, updates) });
+  },
+  setKeyframe: (nodeId, property, time, value) => {
+    set({
+      document: setNodeKeyframe(get().document, nodeId, property, { time, value }),
+    });
+  },
+  removeKeyframe: (nodeId, property, time) => {
+    set({
+      document: removeNodeKeyframe(get().document, nodeId, property, time),
+    });
   },
 
   getNode: (nodeId) => {

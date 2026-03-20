@@ -35,6 +35,30 @@ export interface SceneNode {
   readonly style: NodeStyle;
   readonly visible: boolean;
   readonly locked: boolean;
+  readonly animation: NodeAnimation;
+}
+
+export interface Composition {
+  readonly id: string;
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly background: string;
+  readonly duration: number;
+  readonly fps: number;
+}
+
+export type AnimatableProperty = 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotation' | 'opacity';
+
+export interface Keyframe {
+  readonly time: number;
+  readonly value: number;
+}
+
+export type AnimationTrack = Partial<Record<AnimatableProperty, Keyframe[]>>;
+
+export interface NodeAnimation {
+  readonly tracks: AnimationTrack;
 }
 
 export interface Document {
@@ -42,6 +66,7 @@ export interface Document {
   readonly name: string;
   readonly width: number;
   readonly height: number;
+  readonly composition: Composition;
   readonly nodes: Record<string, SceneNode>;
   readonly rootNodeIds: string[];
 }
@@ -73,9 +98,24 @@ export function createDocument(name: string, width = 1920, height = 1080): Docum
   return {
     id: generateId(),
     name,
+    composition: {
+      id: generateId(),
+      name: 'Main Comp',
+      width,
+      height,
+      background: '#1a1a2e',
+      duration: 5,
+      fps: 30,
+    },
     width,
     height,
     nodes: {},
     rootNodeIds: [],
+  };
+}
+
+export function defaultNodeAnimation(): NodeAnimation {
+  return {
+    tracks: {},
   };
 }
