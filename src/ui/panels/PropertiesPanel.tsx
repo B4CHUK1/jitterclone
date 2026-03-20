@@ -34,6 +34,9 @@ export function PropertiesPanel() {
   const addKeyframeAtCurrentTime = useDocumentStore((s) => s.addKeyframeAtCurrentTime);
   const currentTime = useTimelineStore((s) => s.currentTime);
   const autoKeyframe = useTimelineStore((s) => s.autoKeyframe);
+  const addEffect = useDocumentStore((s) => s.addEffect);
+  const removeEffect = useDocumentStore((s) => s.removeEffect);
+  const applyPreset = useDocumentStore((s) => s.applyPreset);
 
   if (selectedIds.size === 0) {
     return (
@@ -151,10 +154,6 @@ export function PropertiesPanel() {
   if (!node) {
     return <div className={styles.panel}><div className={styles.empty}>No selection</div></div>;
   }
-
-  const addEffect = useDocumentStore((s) => s.addEffect);
-  const removeEffect = useDocumentStore((s) => s.removeEffect);
-  const applyPreset = useDocumentStore((s) => s.applyPreset);
 
   const evaluatedNode = evaluateNodeAtTime(node, currentTime);
   const t = evaluatedNode.transform;
