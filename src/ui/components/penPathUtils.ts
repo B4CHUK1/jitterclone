@@ -31,7 +31,7 @@ function cubicBezier1D(p0: number, p1: number, p2: number, p3: number, t: number
 function cubicDerivativeRoots1D(p0: number, p1: number, p2: number, p3: number): number[] {
   const a = -p0 + 3 * p1 - 3 * p2 + p3;
   const b = 2 * (p0 - 2 * p1 + p2);
-  const c = -p0 + p1;
+  const c = p1 - p0;
 
   if (Math.abs(a) < 1e-8) {
     if (Math.abs(b) < 1e-8) return [];
@@ -74,6 +74,22 @@ function cubicSegmentBounds(
     }
   }
 
+  return bounds;
+}
+
+function computePenAnchorBounds(points: PenPoint[]): Bounds {
+  if (points.length === 0) {
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  }
+  const bounds: Bounds = {
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+  };
+  for (const point of points) {
+    expandBounds(bounds, point.x, point.y);
+  }
   return bounds;
 }
 
@@ -122,7 +138,10 @@ export function normalizePenPath(points: PenPoint[], closed: boolean): {
   pathData: PathPoint[];
   pathClosed: boolean;
 } {
-  const { minX, minY, maxX, maxY } = computePenPathBounds(points, closed);
+  // Keep normalization anchored to placed points (preview reference frame).
+  // Bézier handles stay relative and can extend outside this box without
+  // introducing a transform origin shift at finalize/close time.
+  const { minX, minY, maxX, maxY } = computePenAnchorBounds(points);
   const width = Math.max(1, maxX - minX);
   const height = Math.max(1, maxY - minY);
 
