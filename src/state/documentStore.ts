@@ -199,7 +199,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     set({ document: nextDoc });
   },
 
-  setAnimatableValue: (nodeId, property, value, globalTime, autoKeyframe) => {
+  setAnimatableValue: (nodeId, property, value, globalTime, _autoKeyframe) => {
     const doc = get().document;
     const node = doc.nodes[nodeId];
     if (!node) return;
