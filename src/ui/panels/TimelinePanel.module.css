@@ -67,6 +67,11 @@
   touch-action: none;
 }
 
+/* ── Viewport scrubbing state ── */
+.viewportScrubbing {
+  cursor: col-resize;
+}
+
 /* ── Timeline space (virtual canvas) ── */
 .timelineSpace {
   position: relative;
@@ -293,6 +298,41 @@
   font-variant-numeric: tabular-nums;
   transform: translate(-50%, -100%);
   margin-top: -8px;
+}
+
+/* ── Work area ── */
+.workArea {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: color-mix(in srgb, var(--color-selection) 12%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--color-selection) 60%, transparent);
+  border-right: 2px solid color-mix(in srgb, var(--color-selection) 60%, transparent);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.workAreaHandle {
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 6;
+  pointer-events: auto;
+}
+
+.workAreaHandle:hover {
+  background: color-mix(in srgb, var(--color-selection) 30%, transparent);
+}
+
+.workAreaInactive {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  z-index: 3;
 }
 
 /* ── Playhead ── */

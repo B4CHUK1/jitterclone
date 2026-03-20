@@ -50,7 +50,7 @@ interface DocumentState {
   updateStyle: (nodeId: string, updates: Partial<NodeStyle>) => void;
   updateProps: (nodeId: string, updates: Partial<Pick<SceneNode, 'name' | 'visible' | 'locked'>>) => void;
   updateComposition: (
-    updates: Partial<Pick<Document['composition'], 'name' | 'width' | 'height' | 'background' | 'duration' | 'fps'>>,
+    updates: Partial<Pick<Document['composition'], 'name' | 'width' | 'height' | 'background' | 'duration' | 'fps' | 'workAreaStart' | 'workAreaEnd'>>,
   ) => void;
 
   /** Set a keyframe at LOCAL time */
@@ -162,7 +162,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     set({ document: nextDoc });
   },
 
-  setAnimatableValue: (nodeId, property, value, globalTime, _autoKeyframe) => {
+  setAnimatableValue: (nodeId, property, value, globalTime, autoKeyframe) => {
     const doc = get().document;
     const node = doc.nodes[nodeId];
     if (!node) return;
@@ -177,8 +177,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       },
     };
 
-    // If the property is animated, insert/update keyframe at this time
-    if (propertyState.animated) {
+    // If the property is animated and auto-keyframe is on, insert/update keyframe at this time
+    if (propertyState.animated && autoKeyframe) {
       const localTime = clampKeyframeTime(globalToLocalTime(globalTime, node), node);
       nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: localTime, value });
     }

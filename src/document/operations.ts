@@ -158,7 +158,7 @@ export function updateNodeProps(
 
 export function updateComposition(
   doc: Document,
-  updates: Partial<Pick<Composition, 'name' | 'width' | 'height' | 'background' | 'duration' | 'fps'>>,
+  updates: Partial<Pick<Composition, 'name' | 'width' | 'height' | 'background' | 'duration' | 'fps' | 'workAreaStart' | 'workAreaEnd'>>,
 ): Document {
   const nextComposition = {
     ...doc.composition,

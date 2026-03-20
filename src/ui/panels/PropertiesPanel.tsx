@@ -11,7 +11,7 @@ import {
 import { getRenderNodeBounds } from '@/engine/interaction/snapEngine';
 import type { Document } from '@/document/types';
 import type { AnimatableProperty } from '@/document/types';
-import { evaluateNodeAtTime, hasKeyframeAtTime, isPropertyAnimated } from '@/engine/animation';
+import { evaluateNodeAtTime, hasKeyframeAtTime, isPropertyAnimated, globalToLocalTime } from '@/engine/animation';
 import { useEditorStore, useDocumentStore, useTimelineStore } from '@/state';
 import { NumericInput } from '@/ui/components/NumericInput';
 import styles from './PropertiesPanel.module.css';
@@ -167,7 +167,7 @@ export function PropertiesPanel() {
 
   const keyButton = (property: AnimatableProperty) => (
     <button className={styles.actionButton} type="button" onClick={() => addKeyframeAtCurrentTime(nodeId, property, currentTime)}>
-      {hasKeyframeAtTime(node, property, currentTime) ? '● Key' : '+ Key'}
+      {hasKeyframeAtTime(node, property, globalToLocalTime(currentTime, node)) ? '● Key' : '+ Key'}
     </button>
   );
 
