@@ -70,6 +70,15 @@ interface DocumentState {
     fromLocalTime: number,
     toLocalTime: number,
   ) => void;
+  /** Batch-move multiple keyframes atomically (prevents collisions during multi-drag) */
+  moveKeyframes: (
+    moves: Array<{
+      nodeId: string;
+      property: AnimatableProperty;
+      fromLocalTime: number;
+      toLocalTime: number;
+    }>,
+  ) => void;
   /**
    * Set an animatable value. If the property is animated, inserts a keyframe
    * at the given GLOBAL time (converted to local internally).
@@ -199,6 +208,51 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     let nextDoc = removeNodeKeyframe(doc, nodeId, property, fromLocalTime);
     nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: clamped, value: keyframe.value, easing: keyframe.easing ?? 'linear', bezier: keyframe.bezier });
     set({ document: nextDoc });
+  },
+
+  /**
+   * Batch-move multiple keyframes atomically.
+   * Removes all source keyframes first, then inserts at new times.
+   * This prevents intermediate collisions when keyframes cross paths.
+   */
+  moveKeyframes: (moves) => {
+    let doc = get().document;
+    // Phase 1: collect all keyframe data and remove from source positions
+    const collected: Array<{
+      nodeId: string;
+      property: AnimatableProperty;
+      toLocalTime: number;
+      value: number;
+      easing: import('@/document/types').EasingPreset;
+      bezier?: import('@/document/types').CubicBezierEasing;
+    }> = [];
+    for (const move of moves) {
+      const node = doc.nodes[move.nodeId];
+      if (!node) continue;
+      const keyframe = node.animation.properties[move.property].keyframes.find(
+        (key) => Math.abs(key.time - move.fromLocalTime) < 1e-6,
+      );
+      if (!keyframe) continue;
+      collected.push({
+        nodeId: move.nodeId,
+        property: move.property,
+        toLocalTime: clampKeyframeTime(move.toLocalTime, node),
+        value: keyframe.value,
+        easing: keyframe.easing ?? 'linear',
+        bezier: keyframe.bezier,
+      });
+      doc = removeNodeKeyframe(doc, move.nodeId, move.property, move.fromLocalTime);
+    }
+    // Phase 2: insert all keyframes at new positions
+    for (const item of collected) {
+      doc = setNodeKeyframe(doc, item.nodeId, item.property, {
+        time: item.toLocalTime,
+        value: item.value,
+        easing: item.easing,
+        bezier: item.bezier,
+      });
+    }
+    set({ document: doc });
   },
 
   setAnimatableValue: (nodeId, property, value, globalTime, _autoKeyframe) => {

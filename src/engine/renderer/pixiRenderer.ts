@@ -215,21 +215,29 @@ export class PixiRenderer {
     }
 
     // Handle gaussian blur.
-    // Apply to the container so the blurred output can expand beyond the shape's bounds.
-    // Explicit padding prevents the blur from being clipped at the shape edges.
+    // Applied to the main Graphics (not the container) so it blurs only the shape
+    // geometry, not the bounding box. The blur follows the actual shape silhouette
+    // because PixiJS rasterizes the Graphics first, then applies the filter to those pixels.
+    // Using generous padding to prevent clipping at the edges.
     const blurEffect = effects.find((e): e is Extract<Effect, { type: 'blur' }> => e.type === 'blur');
     if (blurEffect && blurEffect.radius > 0) {
+      const radius = blurEffect.radius;
+      // Quality scales with radius for smooth results
+      const quality = Math.min(8, Math.max(4, Math.ceil(radius / 4)));
+      // Generous padding: 4x radius ensures blur is never clipped
+      const padding = Math.ceil(radius * 4) + 2;
       const blurFilter = new BlurFilter({
-        strength: blurEffect.radius,
-        quality: 4,
-        padding: Math.ceil(blurEffect.radius * 3),
+        strength: radius,
+        quality,
+        padding,
       });
-      display.container.filters = [blurFilter];
+      display.main.filters = [blurFilter];
+      // Container must not also have a blur — only main gets it
+      display.container.filters = [];
     } else {
+      display.main.filters = [];
       display.container.filters = [];
     }
-    // Never apply a separate blur to main — container-level is authoritative
-    display.main.filters = [];
   }
 
   private drawShapePath(gfx: Graphics, node: SceneNode): void {
@@ -255,9 +263,40 @@ export class PixiRenderer {
         const pathData = node.pathData;
         if (pathData && pathData.length > 1) {
           // Path points are stored in normalized [0,1] space relative to width/height
-          gfx.moveTo(pathData[0]!.x * width, pathData[0]!.y * height);
+          const p0 = pathData[0]!;
+          gfx.moveTo(p0.x * width, p0.y * height);
           for (let i = 1; i < pathData.length; i++) {
-            gfx.lineTo(pathData[i]!.x * width, pathData[i]!.y * height);
+            const prev = pathData[i - 1]!;
+            const curr = pathData[i]!;
+            const hasHandles =
+              (prev.handleOutX !== undefined && prev.handleOutY !== undefined) ||
+              (curr.handleInX !== undefined && curr.handleInY !== undefined);
+            if (hasHandles) {
+              // Bézier cubic: use outgoing handle of prev and incoming handle of curr
+              const cp1x = (prev.x + (prev.handleOutX ?? 0)) * width;
+              const cp1y = (prev.y + (prev.handleOutY ?? 0)) * height;
+              const cp2x = (curr.x + (curr.handleInX ?? 0)) * width;
+              const cp2y = (curr.y + (curr.handleInY ?? 0)) * height;
+              gfx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, curr.x * width, curr.y * height);
+            } else {
+              gfx.lineTo(curr.x * width, curr.y * height);
+            }
+          }
+          // Close the path if flagged
+          if (node.pathClosed) {
+            // Handle Bézier closure: last→first segment
+            const last = pathData[pathData.length - 1]!;
+            const hasClosingHandles =
+              (last.handleOutX !== undefined && last.handleOutY !== undefined) ||
+              (p0.handleInX !== undefined && p0.handleInY !== undefined);
+            if (hasClosingHandles) {
+              const cp1x = (last.x + (last.handleOutX ?? 0)) * width;
+              const cp1y = (last.y + (last.handleOutY ?? 0)) * height;
+              const cp2x = (p0.x + (p0.handleInX ?? 0)) * width;
+              const cp2y = (p0.y + (p0.handleInY ?? 0)) * height;
+              gfx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p0.x * width, p0.y * height);
+            }
+            gfx.closePath();
           }
         }
         break;
@@ -307,8 +346,11 @@ export class PixiRenderer {
 
     if (!fill) return;
 
-    // Fill
-    if (fill.opacity > 0 && node.type !== 'line') {
+    const isClosedPath = node.type === 'path' && node.pathClosed;
+    const isOpenPath = node.type === 'path' && !node.pathClosed;
+
+    // Fill: apply to all closed shapes (including closed paths), skip lines and open paths
+    if (fill.opacity > 0 && node.type !== 'line' && !isOpenPath) {
       this.drawShapePath(gfx, node);
       gfx.fill({ color: fill.color, alpha: fill.opacity });
     }
@@ -317,11 +359,16 @@ export class PixiRenderer {
     if (stroke && stroke.opacity > 0 && stroke.width > 0) {
       this.drawShapePath(gfx, node);
       gfx.stroke({ color: stroke.color, alpha: stroke.opacity, width: stroke.width });
-    } else if (node.type === 'line' || node.type === 'path') {
-      // Lines and paths always need a stroke
+    } else if (node.type === 'line' || isOpenPath) {
+      // Lines and open paths always need a visible stroke
       this.drawShapePath(gfx, node);
       const color = stroke?.color ?? fill.color ?? '#ffffff';
       gfx.stroke({ color, alpha: stroke?.opacity ?? fill.opacity ?? 1, width: stroke?.width ?? 3 });
+    } else if (isClosedPath && !(stroke && stroke.opacity > 0 && stroke.width > 0)) {
+      // Closed paths: add a default stroke for visibility
+      this.drawShapePath(gfx, node);
+      const color = stroke?.color ?? fill.color ?? '#ffffff';
+      gfx.stroke({ color, alpha: stroke?.opacity ?? 0.8, width: stroke?.width ?? 2 });
     }
   }
 
