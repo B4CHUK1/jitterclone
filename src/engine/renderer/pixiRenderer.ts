@@ -3,7 +3,7 @@
  * Completely decoupled from React.
  */
 
-import { Application, Container, Graphics, BlurFilter } from 'pixi.js';
+import { Application, Container, Graphics, BlurFilter, Rectangle } from 'pixi.js';
 import type { RenderNode } from '@/engine/scene';
 import type { BlendMode, Effect, SceneNode } from '@/document/types';
 
@@ -224,18 +224,26 @@ export class PixiRenderer {
       const radius = blurEffect.radius;
       // Quality scales with radius for smooth results
       const quality = Math.min(8, Math.max(4, Math.ceil(radius / 4)));
-      // Generous padding: 4x radius ensures blur is never clipped
-      const padding = Math.ceil(radius * 4) + 2;
+      // Tight filter region around the actual vector geometry to avoid visible rectangular quads.
+      const padding = Math.ceil(radius * 2) + 2;
       const blurFilter = new BlurFilter({
         strength: radius,
         quality,
         padding,
       });
+      const b = display.main.getLocalBounds();
+      display.main.filterArea = new Rectangle(
+        b.x - padding,
+        b.y - padding,
+        b.width + padding * 2,
+        b.height + padding * 2,
+      );
       display.main.filters = [blurFilter];
       // Container must not also have a blur — only main gets it
       display.container.filters = [];
     } else {
       display.main.filters = [];
+      display.main.filterArea = undefined;
       display.container.filters = [];
     }
   }

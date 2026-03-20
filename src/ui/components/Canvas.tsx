@@ -102,7 +102,6 @@ export function Canvas() {
   }
   const penPointsRef = useRef<PenPoint[]>([]);
   const penActiveRef = useRef(false);
-  const penLastClickTimeRef = useRef(0);
   const penDraggingHandleRef = useRef(false);
   const penClosedRef = useRef(false);
   const [penPreview, setPenPreview] = useState<{
@@ -123,7 +122,6 @@ export function Canvas() {
   const toggleSelect = useEditorStore((s) => s.toggleSelect);
   const deselectAll = useEditorStore((s) => s.deselectAll);
   const activeTool = useEditorStore((s) => s.activeTool);
-  const setTool = useEditorStore((s) => s.setTool);
   const autoKeyframe = useTimelineStore((s) => s.autoKeyframe);
 
   const zoom = useViewportStore((s) => s.zoom);
@@ -311,30 +309,16 @@ export function Canvas() {
     penClosedRef.current = false;
     setPenPreview(null);
     setInteractionCursor(null);
-    penLastClickTimeRef.current = 0;
 
     if (points.length >= 2) {
-      // Calculate bounding box including handle positions for accurate sizing
+      // Keep the same geometric reference between live preview and final node:
+      // bounds are based on anchor positions so closing/finalizing does not shift the shape.
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const p of points) {
-        // Include the point itself
         if (p.x < minX) minX = p.x;
         if (p.y < minY) minY = p.y;
         if (p.x > maxX) maxX = p.x;
         if (p.y > maxY) maxY = p.y;
-        // Include handle positions for accurate bounds
-        const hox = p.x + p.handleOutX;
-        const hoy = p.y + p.handleOutY;
-        const hix = p.x + p.handleInX;
-        const hiy = p.y + p.handleInY;
-        if (hox < minX) minX = hox;
-        if (hoy < minY) minY = hoy;
-        if (hox > maxX) maxX = hox;
-        if (hoy > maxY) maxY = hoy;
-        if (hix < minX) minX = hix;
-        if (hiy < minY) minY = hiy;
-        if (hix > maxX) maxX = hix;
-        if (hiy > maxY) maxY = hiy;
       }
       const w = Math.max(1, maxX - minX);
       const h = Math.max(1, maxY - minY);
@@ -367,20 +351,13 @@ export function Canvas() {
       } as Partial<import('@/document/types').SceneNode>);
       select(id);
     }
-    setTool('select');
-  }, [addNode, select, setTool]);
+  }, [addNode, select]);
 
-  // ── Pen tool keyboard: Enter = finalize, Escape = cancel ──
+  // ── Pen tool keyboard: Enter/Escape finalize open path ──
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && penActiveRef.current) {
-        penActiveRef.current = false;
-        penPointsRef.current = [];
-        penDraggingHandleRef.current = false;
-        penClosedRef.current = false;
-        setPenPreview(null);
-        setInteractionCursor(null);
-        setTool('select');
+        finalizePenPath(false);
       }
       if (e.key === 'Enter' && penActiveRef.current) {
         finalizePenPath(false);
@@ -388,7 +365,7 @@ export function Canvas() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [finalizePenPath, setTool]);
+  }, [finalizePenPath]);
 
   // ── Cancel pen path when switching tools ──
   useEffect(() => {
@@ -477,14 +454,6 @@ export function Canvas() {
         e.preventDefault();
         const screen = clientToScreen(e.clientX, e.clientY);
         const world = screenToWorld(screen);
-
-        // Double-click: finalize path (open)
-        const now = Date.now();
-        if (penActiveRef.current && penPointsRef.current.length >= 2 && now - penLastClickTimeRef.current < 350) {
-          finalizePenPath(false);
-          return;
-        }
-        penLastClickTimeRef.current = now;
 
         // Click near first anchor point: close and finalize path
         if (penActiveRef.current && penPointsRef.current.length >= 3) {

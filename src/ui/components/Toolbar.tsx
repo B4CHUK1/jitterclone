@@ -2,18 +2,7 @@ import { useEditorStore, useViewportStore, useDocumentStore } from '@/state';
 import type { EditorTool } from '@/state/editorStore';
 import type { NodeType } from '@/document/types';
 import { defaultTransform } from '@/engine/transform/transform';
-import {
-  MousePointer2,
-  Square,
-  Circle,
-  Pentagon,
-  Star,
-  Minus,
-  Hand,
-  PenTool,
-  Undo2,
-  Redo2,
-} from 'lucide-react';
+import { MousePointer2, Square, Circle, Pentagon, Star, Minus, Hand, PenTool, Undo2, Redo2 } from '@/ui/components/icons';
 import styles from './Toolbar.module.css';
 
 const tools: { id: EditorTool; label: string; shortcut: string; icon: React.ReactNode }[] = [
