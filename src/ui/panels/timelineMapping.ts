@@ -1,14 +1,30 @@
-export const TIMELINE_LEFT_GUTTER = 8;
 export const BASE_PIXELS_PER_SECOND = 120;
 
-export function getPixelsPerSecond(zoom: number): number {
-  return BASE_PIXELS_PER_SECOND * zoom;
+export interface TimelineTimeScale {
+  duration: number;
+  zoom: number;
+  pixelsPerSecond: number;
+  contentWidth: number;
+  toX: (time: number) => number;
+  toTime: (x: number) => number;
+  clampTime: (time: number) => number;
 }
 
-export function timeToPixel(time: number, zoom: number): number {
-  return TIMELINE_LEFT_GUTTER + Math.max(0, time) * getPixelsPerSecond(zoom);
-}
+export function createTimelineTimeScale(duration: number, zoom: number): TimelineTimeScale {
+  const safeDuration = Math.max(0, duration);
+  const pixelsPerSecond = BASE_PIXELS_PER_SECOND * Math.max(0.25, zoom);
 
-export function pixelToTime(pixel: number, zoom: number): number {
-  return Math.max(0, (pixel - TIMELINE_LEFT_GUTTER) / getPixelsPerSecond(zoom));
+  const clampTime = (time: number) => Math.max(0, Math.min(safeDuration, time));
+  const toX = (time: number) => clampTime(time) * pixelsPerSecond;
+  const toTime = (x: number) => clampTime(Math.max(0, x) / pixelsPerSecond);
+
+  return {
+    duration: safeDuration,
+    zoom,
+    pixelsPerSecond,
+    contentWidth: Math.max(640, toX(safeDuration)),
+    toX,
+    toTime,
+    clampTime,
+  };
 }

@@ -3,7 +3,8 @@ import type { PointerEvent } from 'react';
 import type { AnimatableProperty, SceneNode } from '@/document/types';
 import { evaluateNodeAtTime, hasKeyframeAtTime, isPropertyAnimated } from '@/engine/animation';
 import { useDocumentStore, useEditorStore, useTimelineStore } from '@/state';
-import { pixelToTime, timeToPixel } from './timelineMapping';
+import { buildTimelineLayout, TIMELINE_LABEL_WIDTH, TIMELINE_RULER_HEIGHT } from './timelineLayout';
+import { createTimelineTimeScale } from './timelineMapping';
 import styles from './TimelinePanel.module.css';
 
 const PROPERTIES: { key: AnimatableProperty; label: string }[] = [
@@ -15,6 +16,8 @@ const PROPERTIES: { key: AnimatableProperty; label: string }[] = [
   { key: 'opacity', label: 'Opacity' },
 ];
 
+const END_EPSILON_SECONDS = 1e-4;
+
 export function TimelinePanel() {
   const document = useDocumentStore((s) => s.document);
   const currentTime = useTimelineStore((s) => s.currentTime);
@@ -22,7 +25,6 @@ export function TimelinePanel() {
   const isPlaying = useTimelineStore((s) => s.isPlaying);
   const play = useTimelineStore((s) => s.play);
   const pause = useTimelineStore((s) => s.pause);
-  const togglePlay = useTimelineStore((s) => s.togglePlay);
   const autoKeyframe = useTimelineStore((s) => s.autoKeyframe);
   const toggleAutoKeyframe = useTimelineStore((s) => s.toggleAutoKeyframe);
   const zoom = useTimelineStore((s) => s.zoom);
@@ -39,6 +41,7 @@ export function TimelinePanel() {
 
   const { duration, fps } = document.composition;
   const frame = Math.round(currentTime * fps);
+  const frameStep = 1 / Math.max(1, fps);
 
   const tracks = useMemo(
     () =>
@@ -48,15 +51,21 @@ export function TimelinePanel() {
     [document],
   );
 
-  const clampTime = (value: number) => Math.max(0, Math.min(duration, value));
-  const contentWidth = Math.max(640, timeToPixel(duration, zoom) + 80);
-  const playheadX = timeToPixel(clampTime(currentTime), zoom);
+  const timeScale = useMemo(() => createTimelineTimeScale(duration, zoom), [duration, zoom]);
+  const layout = useMemo(
+    () => buildTimelineLayout(tracks, expandedLayers, PROPERTIES),
+    [tracks, expandedLayers],
+  );
+
+  const totalWidth = TIMELINE_LABEL_WIDTH + timeScale.contentWidth;
+  const playheadX = TIMELINE_LABEL_WIDTH + timeScale.toX(currentTime);
 
   const updateTimeFromClientX = (clientX: number) => {
     if (!viewportRef.current) return;
     const rect = viewportRef.current.getBoundingClientRect();
-    const pixelInContent = clientX - rect.left + viewportRef.current.scrollLeft;
-    setCurrentTime(clampTime(pixelToTime(pixelInContent, zoom)));
+    const pixelInSpace = clientX - rect.left + viewportRef.current.scrollLeft;
+    const pixelInTimeline = pixelInSpace - TIMELINE_LABEL_WIDTH;
+    setCurrentTime(timeScale.toTime(pixelInTimeline));
   };
 
   const beginScrub = (event: PointerEvent<HTMLDivElement>) => {
@@ -91,11 +100,67 @@ export function TimelinePanel() {
     }
   };
 
+  const handlePlayPause = () => {
+    if (isPlaying) {
+      pause();
+      return;
+    }
+    if (duration > 0 && currentTime >= duration - END_EPSILON_SECONDS) {
+      setCurrentTime(0);
+    }
+    play();
+  };
+
+  const handleStop = () => {
+    pause();
+    setCurrentTime(0);
+  };
+
+  const stepFrame = (direction: -1 | 1) => {
+    pause();
+    setCurrentTime(timeScale.clampTime(currentTime + direction * frameStep));
+  };
+
+  const jumpToStart = () => {
+    pause();
+    setCurrentTime(0);
+  };
+
+  const jumpToEnd = () => {
+    pause();
+    setCurrentTime(duration);
+  };
+
+  const rulerTicks = useMemo(() => {
+    const majorStep = duration <= 10 ? 0.5 : 1;
+    const ticks: { time: number; label?: string }[] = [];
+    for (let t = 0; t <= duration + 1e-6; t += majorStep) {
+      const major = Math.abs(t % 1) < 1e-6 || majorStep >= 1;
+      ticks.push({ time: t, label: major ? `${t.toFixed(majorStep < 1 ? 1 : 0)}s` : undefined });
+    }
+    return ticks;
+  }, [duration]);
+
   return (
     <div className={styles.timeline}>
       <div className={styles.header}>
-        <button type="button" className={styles.playButton} onClick={togglePlay}>
-          {isPlaying ? 'Pause' : 'Play'}
+        <button type="button" className={styles.playButton} onClick={jumpToStart}>
+          ⏮ Start
+        </button>
+        <button type="button" className={styles.playButton} onClick={() => stepFrame(-1)}>
+          ◀ Frame
+        </button>
+        <button type="button" className={styles.playButton} onClick={handlePlayPause}>
+          {isPlaying ? '❚❚ Pause' : '▶ Play'}
+        </button>
+        <button type="button" className={styles.playButton} onClick={handleStop}>
+          ⏹ Stop
+        </button>
+        <button type="button" className={styles.playButton} onClick={() => stepFrame(1)}>
+          Frame ▶
+        </button>
+        <button type="button" className={styles.playButton} onClick={jumpToEnd}>
+          End ⏭
         </button>
         <button type="button" className={styles.playButton} onClick={toggleAutoKeyframe}>
           {autoKeyframe ? 'Auto-Key ON' : 'Auto-Key OFF'}
@@ -114,51 +179,83 @@ export function TimelinePanel() {
         onPointerCancel={endScrub}
         onScroll={(e) => setScrollOffset(e.currentTarget.scrollLeft)}
       >
-        <div className={styles.timelineSpace} style={{ width: `${contentWidth}px` }}>
+        <div
+          className={styles.timelineSpace}
+          style={{ width: `${totalWidth}px`, height: `${layout.totalHeight}px` }}
+        >
           <div className={styles.playhead} style={{ left: `${playheadX}px` }}>
             <div className={styles.playheadHead} />
           </div>
 
-          <div className={styles.tracks}>
-            {tracks.map((node) => {
-              const expanded = expandedLayers[node.id] ?? true;
+          <div className={styles.row} style={{ top: 0, height: `${TIMELINE_RULER_HEIGHT}px` }}>
+            <div className={`${styles.labelCell} ${styles.rulerLabel}`}>Time</div>
+            <div className={`${styles.timeCell} ${styles.rulerCell}`}>
+              {rulerTicks.map((tick) => (
+                <div
+                  key={`tick_${tick.time}`}
+                  className={styles.rulerTick}
+                  style={{ left: `${timeScale.toX(tick.time)}px` }}
+                >
+                  <div className={styles.rulerLine} />
+                  {tick.label ? <div className={styles.rulerText}>{tick.label}</div> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {layout.rows.map((row) => {
+            if (row.kind === 'layer') {
+              const expanded = expandedLayers[row.node.id] ?? true;
               return (
-                <div key={node.id} className={styles.trackGroup}>
-                  <div className={styles.trackRow}>
+                <div
+                  key={row.id}
+                  className={styles.row}
+                  style={{ top: `${row.top}px`, height: `${row.height}px` }}
+                >
+                  <div className={`${styles.labelCell} ${styles.layerLabelCell}`}>
                     <button
                       type="button"
                       className={styles.expandButton}
-                      onClick={() => setExpandedLayers((s) => ({ ...s, [node.id]: !expanded }))}
+                      onClick={() => setExpandedLayers((s) => ({ ...s, [row.node.id]: !expanded }))}
                     >
                       {expanded ? '▾' : '▸'}
                     </button>
-                    <div className={styles.trackName}>
-                      {selectedIds.has(node.id) ? '● ' : ''}
-                      {node.name}
-                    </div>
-                    <div className={styles.trackKeys} />
+                    <span className={styles.trackName}>
+                      {selectedIds.has(row.node.id) ? '● ' : ''}
+                      {row.node.name}
+                    </span>
                   </div>
-                  {expanded &&
-                    PROPERTIES.map((property) => (
-                      <PropertyRow
-                        key={`${node.id}_${property.key}`}
-                        node={node}
-                        property={property.key}
-                        label={property.label}
-                        currentTime={currentTime}
-                        onSeek={setCurrentTime}
-                        onAddKey={() =>
-                          addKeyframeAtCurrentTime(node.id, property.key, currentTime)
-                        }
-                        onToggleStopwatch={() =>
-                          togglePropertyStopwatch(node.id, property.key, currentTime)
-                        }
-                      />
-                    ))}
+                  <div className={`${styles.timeCell} ${styles.layerTimeCell}`}>
+                    <div
+                      className={styles.layerClipBar}
+                      style={{
+                        left: `${timeScale.toX(0)}px`,
+                        width: `${timeScale.toX(duration)}px`,
+                      }}
+                    />
+                  </div>
                 </div>
               );
-            })}
-          </div>
+            }
+
+            return (
+              <PropertyRow
+                key={row.id}
+                top={row.top}
+                height={row.height}
+                node={row.node}
+                property={row.property}
+                label={row.label}
+                currentTime={currentTime}
+                onSeek={setCurrentTime}
+                onAddKey={() => addKeyframeAtCurrentTime(row.node.id, row.property, currentTime)}
+                onToggleStopwatch={() =>
+                  togglePropertyStopwatch(row.node.id, row.property, currentTime)
+                }
+                xForTime={timeScale.toX}
+              />
+            );
+          })}
         </div>
       </div>
     </div>
@@ -173,6 +270,9 @@ function PropertyRow({
   onSeek,
   onAddKey,
   onToggleStopwatch,
+  xForTime,
+  top,
+  height,
 }: {
   node: SceneNode;
   property: AnimatableProperty;
@@ -181,10 +281,12 @@ function PropertyRow({
   onSeek: (time: number) => void;
   onAddKey: () => void;
   onToggleStopwatch: () => void;
+  xForTime: (time: number) => number;
+  top: number;
+  height: number;
 }) {
   const isAnimated = isPropertyAnimated(node, property);
   const keyframes = node.animation.properties[property].keyframes;
-  const zoom = useTimelineStore((s) => s.zoom);
   const selectedKeyframe = useTimelineStore((s) => s.selectedKeyframe);
   const selectKeyframe = useTimelineStore((s) => s.selectKeyframe);
 
@@ -205,24 +307,35 @@ function PropertyRow({
       : `${Number(currentValue.transform[property as keyof typeof currentValue.transform]).toFixed(2)}`;
 
   return (
-    <div className={styles.propertyRow}>
-      <div className={styles.propertyLabel}>{label}</div>
-      <button type="button" className={styles.stopwatchButton} onClick={onToggleStopwatch}>
-        {isAnimated ? '⏱' : '◌'}
-      </button>
-      <button type="button" className={styles.miniButton} onClick={() => navigateKeyframe('prev')}>
-        ◀
-      </button>
-      <button type="button" className={styles.miniButton} onClick={onAddKey}>
-        {hasKeyframeAtTime(node, property, currentTime) ? '◆' : '+'}
-      </button>
-      <button type="button" className={styles.miniButton} onClick={() => navigateKeyframe('next')}>
-        ▶
-      </button>
-      <div className={styles.valueReadout}>{display}</div>
-      <div className={styles.trackKeys}>
+    <div className={styles.row} style={{ top: `${top}px`, height: `${height}px` }}>
+      <div className={`${styles.labelCell} ${styles.propertyLabelCell}`}>
+        <div className={styles.propertyLabel}>{label}</div>
+        <button type="button" className={styles.stopwatchButton} onClick={onToggleStopwatch}>
+          {isAnimated ? '⏱' : '◌'}
+        </button>
+        <button
+          type="button"
+          className={styles.miniButton}
+          onClick={() => navigateKeyframe('prev')}
+        >
+          ◀
+        </button>
+        <button type="button" className={styles.miniButton} onClick={onAddKey}>
+          {hasKeyframeAtTime(node, property, currentTime) ? '◆' : '+'}
+        </button>
+        <button
+          type="button"
+          className={styles.miniButton}
+          onClick={() => navigateKeyframe('next')}
+        >
+          ▶
+        </button>
+        <div className={styles.valueReadout}>{display}</div>
+      </div>
+
+      <div className={`${styles.timeCell} ${styles.propertyTimeCell}`}>
         {keyframes.map((key) => {
-          const left = timeToPixel(key.time, zoom);
+          const left = xForTime(key.time);
           const isSelected =
             selectedKeyframe?.nodeId === node.id &&
             selectedKeyframe.property === property &&
