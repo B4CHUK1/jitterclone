@@ -1,7 +1,59 @@
-import type { AnimatableProperty, Document, Keyframe, SceneNode } from '@/document/types';
+import type {
+  AnimatableProperty,
+  Document,
+  Keyframe,
+  NodeAnimation,
+  SceneNode,
+} from '@/document/types';
 
-function evaluateTrack(track: Keyframe[] | undefined, time: number): number | undefined {
-  if (!track || track.length === 0) return undefined;
+export function getPropertyStaticValue(node: SceneNode, property: AnimatableProperty): number {
+  switch (property) {
+    case 'x':
+      return node.transform.x;
+    case 'y':
+      return node.transform.y;
+    case 'scaleX':
+      return node.transform.scaleX;
+    case 'scaleY':
+      return node.transform.scaleY;
+    case 'rotation':
+      return node.transform.rotation;
+    case 'opacity':
+      return node.style.opacity;
+  }
+}
+
+export function applyStaticValueToNode(
+  node: SceneNode,
+  property: AnimatableProperty,
+  value: number,
+): SceneNode {
+  switch (property) {
+    case 'x':
+    case 'y':
+    case 'scaleX':
+    case 'scaleY':
+    case 'rotation':
+      return {
+        ...node,
+        transform: {
+          ...node.transform,
+          [property]: value,
+        },
+      };
+    case 'opacity':
+      return {
+        ...node,
+        style: {
+          ...node.style,
+          opacity: value,
+        },
+      };
+  }
+}
+
+function evaluateTrack(track: Keyframe[], time: number): number | undefined {
+  if (track.length === 0) return undefined;
   if (time <= track[0]!.time) return track[0]!.value;
   if (time >= track[track.length - 1]!.time) return track[track.length - 1]!.value;
 
@@ -19,27 +71,27 @@ function evaluateTrack(track: Keyframe[] | undefined, time: number): number | un
   return track[track.length - 1]!.value;
 }
 
-export function evaluateNodeAtTime(node: SceneNode, time: number): SceneNode {
-  const x = evaluateTrack(node.animation.tracks.x, time);
-  const y = evaluateTrack(node.animation.tracks.y, time);
-  const scaleX = evaluateTrack(node.animation.tracks.scaleX, time);
-  const scaleY = evaluateTrack(node.animation.tracks.scaleY, time);
-  const rotation = evaluateTrack(node.animation.tracks.rotation, time);
-  const opacity = evaluateTrack(node.animation.tracks.opacity, time);
+function evaluateAnimatedProperty(node: SceneNode, property: AnimatableProperty, time: number): number {
+  const propertyState = node.animation.properties[property];
+  if (!propertyState.animated) return getPropertyStaticValue(node, property);
+  const value = evaluateTrack(propertyState.keyframes, time);
+  return value ?? getPropertyStaticValue(node, property);
+}
 
+export function evaluateNodeAtTime(node: SceneNode, time: number): SceneNode {
   return {
     ...node,
     transform: {
       ...node.transform,
-      x: x ?? node.transform.x,
-      y: y ?? node.transform.y,
-      scaleX: scaleX ?? node.transform.scaleX,
-      scaleY: scaleY ?? node.transform.scaleY,
-      rotation: rotation ?? node.transform.rotation,
+      x: evaluateAnimatedProperty(node, 'x', time),
+      y: evaluateAnimatedProperty(node, 'y', time),
+      scaleX: evaluateAnimatedProperty(node, 'scaleX', time),
+      scaleY: evaluateAnimatedProperty(node, 'scaleY', time),
+      rotation: evaluateAnimatedProperty(node, 'rotation', time),
     },
     style: {
       ...node.style,
-      opacity: opacity ?? node.style.opacity,
+      opacity: evaluateAnimatedProperty(node, 'opacity', time),
     },
   };
 }
@@ -57,6 +109,29 @@ export function evaluateDocumentAtTime(doc: Document, time: number): Document {
 }
 
 export function hasKeyframeAtTime(node: SceneNode, property: AnimatableProperty, time: number): boolean {
-  const track = node.animation.tracks[property] ?? [];
+  const track = node.animation.properties[property].keyframes;
   return track.some((k) => Math.abs(k.time - time) < 1e-6);
+}
+
+export function isPropertyAnimated(node: SceneNode, property: AnimatableProperty): boolean {
+  return node.animation.properties[property].animated;
+}
+
+export function withPropertyAnimation(
+  node: SceneNode,
+  property: AnimatableProperty,
+  updates: Partial<NodeAnimation['properties'][AnimatableProperty]>,
+): SceneNode {
+  return {
+    ...node,
+    animation: {
+      properties: {
+        ...node.animation.properties,
+        [property]: {
+          ...node.animation.properties[property],
+          ...updates,
+        },
+      },
+    },
+  };
 }

@@ -22,8 +22,10 @@ import {
   updateComposition,
   setNodeKeyframe,
   removeNodeKeyframe,
+  setNodePropertyAnimation,
 } from '@/document/operations';
 import type { Transform } from '@/engine/transform';
+import { applyStaticValueToNode, evaluateNodeAtTime } from '@/engine/animation';
 
 interface DocumentState {
   document: Document;
@@ -40,8 +42,27 @@ interface DocumentState {
   ) => void;
   setKeyframe: (nodeId: string, property: AnimatableProperty, time: number, value: number) => void;
   removeKeyframe: (nodeId: string, property: AnimatableProperty, time: number) => void;
+  setAnimatableValue: (
+    nodeId: string,
+    property: AnimatableProperty,
+    value: number,
+    time: number,
+    autoKeyframe: boolean,
+  ) => void;
+  togglePropertyStopwatch: (nodeId: string, property: AnimatableProperty, time: number) => void;
+  addKeyframeAtCurrentTime: (nodeId: string, property: AnimatableProperty, time: number) => void;
   getNode: (nodeId: string) => SceneNode | undefined;
   reset: (doc?: Document) => void;
+}
+
+function getEvaluatedAnimatableValue(
+  node: SceneNode,
+  property: AnimatableProperty,
+  time: number,
+): number {
+  const evaluated = evaluateNodeAtTime(node, time);
+  if (property === 'opacity') return evaluated.style.opacity;
+  return evaluated.transform[property as keyof Transform] as number;
 }
 
 export const useDocumentStore = create<DocumentState>((set, get) => ({
@@ -84,6 +105,77 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     set({
       document: removeNodeKeyframe(get().document, nodeId, property, time),
     });
+  },
+  setAnimatableValue: (nodeId, property, value, time, autoKeyframe) => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node) return;
+    const propertyState = node.animation.properties[property];
+
+    let nextDoc = {
+      ...doc,
+      nodes: {
+        ...doc.nodes,
+        [nodeId]: applyStaticValueToNode(node, property, value),
+      },
+    };
+
+    const shouldKey = propertyState.animated || autoKeyframe;
+    if (shouldKey) {
+      if (!propertyState.animated) {
+        const baseValue = getEvaluatedAnimatableValue(node, property, time);
+        nextDoc = setNodePropertyAnimation(nextDoc, nodeId, property, {
+          animated: true,
+          keyframes: [{ time, value: baseValue }],
+        });
+      }
+      nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time, value });
+    }
+
+    set({ document: nextDoc });
+  },
+  togglePropertyStopwatch: (nodeId, property, time) => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node) return;
+    const propertyState = node.animation.properties[property];
+
+    if (!propertyState.animated) {
+      const value = getEvaluatedAnimatableValue(node, property, time);
+      let nextDoc = setNodePropertyAnimation(doc, nodeId, property, {
+        animated: true,
+        keyframes: [],
+      });
+      nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time, value });
+      set({ document: nextDoc });
+      return;
+    }
+
+    const value = getEvaluatedAnimatableValue(node, property, time);
+    let nextDoc = {
+      ...doc,
+      nodes: {
+        ...doc.nodes,
+        [nodeId]: applyStaticValueToNode(node, property, value),
+      },
+    };
+    nextDoc = setNodePropertyAnimation(nextDoc, nodeId, property, {
+      animated: false,
+      keyframes: [],
+    });
+    set({ document: nextDoc });
+  },
+  addKeyframeAtCurrentTime: (nodeId, property, time) => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node) return;
+    const value = getEvaluatedAnimatableValue(node, property, time);
+    let nextDoc = doc;
+    if (!node.animation.properties[property].animated) {
+      nextDoc = setNodePropertyAnimation(nextDoc, nodeId, property, { animated: true, keyframes: [] });
+    }
+    nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time, value });
+    set({ document: nextDoc });
   },
 
   getNode: (nodeId) => {

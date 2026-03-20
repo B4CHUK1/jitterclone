@@ -49,16 +49,23 @@ export interface Composition {
 }
 
 export type AnimatableProperty = 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotation' | 'opacity';
+export type InterpolationMode = 'linear';
 
 export interface Keyframe {
   readonly time: number;
   readonly value: number;
 }
 
-export type AnimationTrack = Partial<Record<AnimatableProperty, Keyframe[]>>;
+export interface AnimatedProperty {
+  readonly animated: boolean;
+  readonly keyframes: Keyframe[];
+  readonly interpolation: InterpolationMode;
+}
+
+export type AnimationTrack = Record<AnimatableProperty, AnimatedProperty>;
 
 export interface NodeAnimation {
-  readonly tracks: AnimationTrack;
+  readonly properties: AnimationTrack;
 }
 
 export interface Document {
@@ -116,6 +123,13 @@ export function createDocument(name: string, width = 1920, height = 1080): Docum
 
 export function defaultNodeAnimation(): NodeAnimation {
   return {
-    tracks: {},
+    properties: {
+      x: { animated: false, keyframes: [], interpolation: 'linear' },
+      y: { animated: false, keyframes: [], interpolation: 'linear' },
+      scaleX: { animated: false, keyframes: [], interpolation: 'linear' },
+      scaleY: { animated: false, keyframes: [], interpolation: 'linear' },
+      rotation: { animated: false, keyframes: [], interpolation: 'linear' },
+      opacity: { animated: false, keyframes: [], interpolation: 'linear' },
+    },
   };
 }
