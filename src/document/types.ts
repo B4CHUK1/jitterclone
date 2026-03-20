@@ -36,6 +36,10 @@ export interface SceneNode {
   readonly visible: boolean;
   readonly locked: boolean;
   readonly animation: NodeAnimation;
+  /** Clip start time in seconds (global timeline). Layer is inactive before this. */
+  readonly startTime: number;
+  /** Clip end time in seconds (global timeline). Layer is inactive after this. */
+  readonly endTime: number;
 }
 
 export interface Composition {

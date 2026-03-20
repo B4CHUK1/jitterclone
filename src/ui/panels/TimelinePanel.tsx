@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent, WheelEvent } from 'react';
 import type { AnimatableProperty, SceneNode } from '@/document/types';
-import { evaluateNodeAtTime, hasKeyframeAtTime, isPropertyAnimated } from '@/engine/animation';
+import {
+  evaluateNodeAtTime,
+  hasKeyframeAtTime,
+  isPropertyAnimated,
+  globalToLocalTime,
+  localToGlobalTime,
+  clampKeyframeTime,
+  getClipDuration,
+} from '@/engine/animation';
 import { useDocumentStore, useEditorStore, useTimelineStore } from '@/state';
 import { buildTimelineLayout, TIMELINE_LABEL_WIDTH, TIMELINE_RULER_HEIGHT } from './timelineLayout';
 import { createTimelineTimeScale } from './timelineMapping';
@@ -23,6 +31,7 @@ export function TimelinePanel() {
   const document = useDocumentStore((s) => s.document);
   const moveKeyframe = useDocumentStore((s) => s.moveKeyframe);
   const setKeyframe = useDocumentStore((s) => s.setKeyframe);
+  const updateTiming = useDocumentStore((s) => s.updateTiming);
   const currentTime = useTimelineStore((s) => s.currentTime);
   const setCurrentTime = useTimelineStore((s) => s.setCurrentTime);
   const isPlaying = useTimelineStore((s) => s.isPlaying);
@@ -37,9 +46,6 @@ export function TimelinePanel() {
   const selectedKeyframes = useTimelineStore((s) => s.selectedKeyframes);
   const setSelectedKeyframes = useTimelineStore((s) => s.setSelectedKeyframes);
   const toggleKeyframeSelection = useTimelineStore((s) => s.toggleKeyframeSelection);
-  const layerTimingByNodeId = useTimelineStore((s) => s.layerTimingByNodeId);
-  const ensureLayerTiming = useTimelineStore((s) => s.ensureLayerTiming);
-  const setLayerTiming = useTimelineStore((s) => s.setLayerTiming);
 
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const addKeyframeAtCurrentTime = useDocumentStore((s) => s.addKeyframeAtCurrentTime);
@@ -64,12 +70,6 @@ export function TimelinePanel() {
     [document],
   );
 
-  useEffect(() => {
-    for (const track of tracks) {
-      ensureLayerTiming(track.id, duration);
-    }
-  }, [duration, ensureLayerTiming, tracks]);
-
   const timeScale = useMemo(() => createTimelineTimeScale(duration, timeScaleValue), [duration, timeScaleValue]);
   const layout = useMemo(
     () => buildTimelineLayout(tracks, expandedLayers, PROPERTIES),
@@ -79,21 +79,21 @@ export function TimelinePanel() {
   const totalWidth = TIMELINE_LABEL_WIDTH + timeScale.contentWidth;
   const playheadX = TIMELINE_LABEL_WIDTH + timeScale.toX(currentTime);
 
+  // Collect all snap times (global times: keyframe global positions + clip edges + playhead)
   const allSnapTimes = useMemo(() => {
-    const keyTimes: number[] = [];
+    const times: number[] = [];
     for (const node of tracks) {
+      // Clip edges
+      times.push(node.startTime, node.endTime);
+      // Keyframe global positions
       for (const property of PROPERTIES) {
         for (const key of node.animation.properties[property.key].keyframes) {
-          keyTimes.push(key.time);
+          times.push(localToGlobalTime(key.time, node));
         }
       }
-      const layerTiming = layerTimingByNodeId[node.id];
-      if (layerTiming) {
-        keyTimes.push(layerTiming.startTime, layerTiming.endTime);
-      }
     }
-    return keyTimes;
-  }, [layerTimingByNodeId, tracks]);
+    return times;
+  }, [tracks]);
 
   const getSnapTime = (time: number, lockSnap: boolean, disableSnap: boolean) => {
     if (disableSnap) return timeScale.clampTime(time);
@@ -184,6 +184,7 @@ export function TimelinePanel() {
     setCurrentTime(duration);
   };
 
+  // Copy/paste keyframes (local times)
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
@@ -202,7 +203,12 @@ export function TimelinePanel() {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v' && clipboardKeys.length > 0) {
         const minTime = Math.min(...clipboardKeys.map((key) => key.time));
         for (const key of clipboardKeys) {
-          setKeyframe(key.nodeId, key.property, currentTime + (key.time - minTime), key.value);
+          const node = document.nodes[key.nodeId];
+          if (!node) continue;
+          // Convert current global time to local, then offset
+          const localBase = globalToLocalTime(currentTime, node);
+          const localTime = localBase + (key.time - minTime);
+          setKeyframe(key.nodeId, key.property, localTime, key.value);
         }
       }
     };
@@ -320,7 +326,6 @@ export function TimelinePanel() {
           {layout.rows.map((row) => {
             if (row.kind === 'layer') {
               const expanded = expandedLayers[row.node.id] ?? true;
-              const layerTiming = layerTimingByNodeId[row.node.id] ?? { startTime: 0, endTime: duration };
               return (
                 <div
                   key={row.id}
@@ -342,11 +347,11 @@ export function TimelinePanel() {
                   </div>
                   <div className={`${styles.timeCell} ${styles.layerTimeCell}`}>
                     <LayerBar
-                      startTime={layerTiming.startTime}
-                      endTime={layerTiming.endTime}
+                      node={row.node}
                       xForTime={timeScale.toX}
-                      onChange={(startTime, endTime) => setLayerTiming(row.node.id, { startTime, endTime })}
+                      onTimingChange={(startTime, endTime) => updateTiming(row.node.id, { startTime, endTime })}
                       clampTime={timeScale.clampTime}
+                      pixelsPerSecond={timeScale.pixelsPerSecond}
                     />
                   </div>
                 </div>
@@ -368,12 +373,11 @@ export function TimelinePanel() {
                   togglePropertyStopwatch(row.node.id, row.property, currentTime)
                 }
                 xForTime={timeScale.toX}
-                toTime={timeScale.toTime}
-                clampTime={timeScale.clampTime}
                 moveKeyframe={moveKeyframe}
                 setSelectedKeyframes={setSelectedKeyframes}
                 selectedKeyframes={selectedKeyframes}
                 toggleKeyframeSelection={toggleKeyframeSelection}
+                pixelsPerSecond={timeScale.pixelsPerSecond}
               />
             );
           })}
@@ -383,53 +387,69 @@ export function TimelinePanel() {
   );
 }
 
+/**
+ * LayerBar — The clip bar in the timeline.
+ * Renders at the node's startTime/endTime position.
+ * Supports move (drag center), trim left, trim right.
+ * All operations modify the real document data (startTime/endTime).
+ */
 function LayerBar({
-  startTime,
-  endTime,
+  node,
   xForTime,
-  onChange,
+  onTimingChange,
   clampTime,
+  pixelsPerSecond,
 }: {
-  startTime: number;
-  endTime: number;
+  node: SceneNode;
   xForTime: (time: number) => number;
-  onChange: (start: number, end: number) => void;
+  onTimingChange: (start: number, end: number) => void;
   clampTime: (time: number) => number;
-}) {
+  pixelsPerSecond: number;
+}
+) {
   const [mode, setMode] = useState<'move' | 'left' | 'right' | null>(null);
   const startRef = useRef<{ start: number; end: number; pointerX: number } | null>(null);
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>, nextMode: 'move' | 'left' | 'right') => {
     event.stopPropagation();
     setMode(nextMode);
-    startRef.current = { start: startTime, end: endTime, pointerX: event.clientX };
+    startRef.current = { start: node.startTime, end: node.endTime, pointerX: event.clientX };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!mode || !startRef.current) return;
     const deltaPx = event.clientX - startRef.current.pointerX;
-    const duration = startRef.current.end - startRef.current.start;
-    const pixels = Math.max(1, xForTime(1));
-    const deltaTime = deltaPx / pixels;
+    const deltaTime = deltaPx / pixelsPerSecond;
+    const clipDuration = startRef.current.end - startRef.current.start;
+
     if (mode === 'move') {
-      const start = clampTime(startRef.current.start + deltaTime);
-      onChange(start, clampTime(start + duration));
+      // Move entire clip — keyframes follow automatically (they're relative)
+      const newStart = clampTime(startRef.current.start + deltaTime);
+      const newEnd = clampTime(newStart + clipDuration);
+      // If end was clamped, adjust start to maintain duration
+      const adjustedStart = newEnd - clipDuration;
+      onTimingChange(Math.max(0, adjustedStart), newEnd);
       return;
     }
     if (mode === 'left') {
+      // Trim left edge — changes startTime, keyframes stay relative
       const nextStart = clampTime(Math.min(startRef.current.end - 0.01, startRef.current.start + deltaTime));
-      onChange(nextStart, startRef.current.end);
+      onTimingChange(nextStart, startRef.current.end);
       return;
     }
+    // Trim right edge — changes endTime
     const nextEnd = clampTime(Math.max(startRef.current.start + 0.01, startRef.current.end + deltaTime));
-    onChange(startRef.current.start, nextEnd);
+    onTimingChange(startRef.current.start, nextEnd);
   };
+
+  const left = xForTime(node.startTime);
+  const width = Math.max(4, xForTime(node.endTime) - left);
 
   return (
     <div
       className={styles.layerClipBar}
-      style={{ left: `${xForTime(startTime)}px`, width: `${Math.max(4, xForTime(endTime) - xForTime(startTime))}px` }}
+      style={{ left: `${left}px`, width: `${width}px` }}
       onPointerDown={(e) => onPointerDown(e, 'move')}
       onPointerMove={onPointerMove}
       onPointerUp={() => setMode(null)}
@@ -440,6 +460,13 @@ function LayerBar({
   );
 }
 
+/**
+ * PropertyRow — Shows keyframes for a single property of a node.
+ *
+ * KEY CHANGE: Keyframes are stored in LOCAL time (relative to clip).
+ * They are DISPLAYED at global position: globalX = xForTime(localTime + node.startTime)
+ * They are ONLY visible within the clip range.
+ */
 function PropertyRow({
   node,
   property,
@@ -449,14 +476,13 @@ function PropertyRow({
   onAddKey,
   onToggleStopwatch,
   xForTime,
-  toTime,
-  clampTime,
   top,
   height,
   moveKeyframe,
   selectedKeyframes,
   setSelectedKeyframes,
   toggleKeyframeSelection,
+  pixelsPerSecond,
 }: {
   node: SceneNode;
   property: AnimatableProperty;
@@ -466,26 +492,30 @@ function PropertyRow({
   onAddKey: () => void;
   onToggleStopwatch: () => void;
   xForTime: (time: number) => number;
-  toTime: (x: number) => number;
-  clampTime: (time: number) => number;
   top: number;
   height: number;
-  moveKeyframe: (nodeId: string, property: AnimatableProperty, fromTime: number, toTime: number) => void;
+  moveKeyframe: (nodeId: string, property: AnimatableProperty, fromLocalTime: number, toLocalTime: number) => void;
   selectedKeyframes: { nodeId: string; property: AnimatableProperty; time: number }[];
   setSelectedKeyframes: (selection: { nodeId: string; property: AnimatableProperty; time: number }[]) => void;
   toggleKeyframeSelection: (selection: { nodeId: string; property: AnimatableProperty; time: number }) => void;
+  pixelsPerSecond: number;
 }) {
   const isAnimated = isPropertyAnimated(node, property);
   const keyframes = node.animation.properties[property].keyframes;
+  const clipDuration = getClipDuration(node);
+  const localTime = globalToLocalTime(currentTime, node);
+
+  // Filter keyframes to only those within clip bounds
+  const visibleKeyframes = keyframes.filter((k) => k.time >= -1e-6 && k.time <= clipDuration + 1e-6);
 
   const navigateKeyframe = (direction: 'prev' | 'next') => {
-    if (keyframes.length === 0) return;
-    const sorted = [...keyframes].sort((a, b) => a.time - b.time);
+    if (visibleKeyframes.length === 0) return;
+    const sorted = [...visibleKeyframes].sort((a, b) => a.time - b.time);
     const target =
       direction === 'prev'
-        ? [...sorted].reverse().find((k) => k.time < currentTime - 1e-6)
-        : sorted.find((k) => k.time > currentTime + 1e-6);
-    if (target) onSeek(target.time);
+        ? [...sorted].reverse().find((k) => k.time < localTime - 1e-6)
+        : sorted.find((k) => k.time > localTime + 1e-6);
+    if (target) onSeek(localToGlobalTime(target.time, node));
   };
 
   const currentValue = evaluateNodeAtTime(node, currentTime);
@@ -509,7 +539,7 @@ function PropertyRow({
           ◀
         </button>
         <button type="button" className={styles.miniButton} onClick={onAddKey}>
-          {hasKeyframeAtTime(node, property, currentTime) ? '◆' : '+'}
+          {hasKeyframeAtTime(node, property, localTime) ? '◆' : '+'}
         </button>
         <button
           type="button"
@@ -522,10 +552,15 @@ function PropertyRow({
       </div>
 
       <div className={`${styles.timeCell} ${styles.propertyTimeCell}`}>
-        {keyframes.map((key) => {
-          const left = xForTime(key.time);
+        {visibleKeyframes.map((key) => {
+          // Display at GLOBAL position
+          const globalTime = localToGlobalTime(key.time, node);
+          const left = xForTime(globalTime);
           const isSelected = selectedKeyframes.some(
-            (selection) => selection.nodeId === node.id && selection.property === property && Math.abs(selection.time - key.time) < 1e-6,
+            (selection) =>
+              selection.nodeId === node.id &&
+              selection.property === property &&
+              Math.abs(selection.time - key.time) < 1e-6,
           );
           return (
             <button
@@ -534,24 +569,27 @@ function PropertyRow({
               data-keyframe-button="true"
               className={`${styles.keyDiamond}${isSelected ? ` ${styles.keyDiamondSelected}` : ''}`}
               style={{ left: `${left}px` }}
-              title={`${key.time.toFixed(2)}s`}
+              title={`local: ${key.time.toFixed(2)}s | global: ${globalTime.toFixed(2)}s`}
               onClick={(event) => {
+                // Selection uses local time
                 const selection = { nodeId: node.id, property, time: key.time };
                 if (event.shiftKey) {
                   toggleKeyframeSelection(selection);
                 } else {
                   setSelectedKeyframes([selection]);
                 }
-                onSeek(key.time);
+                onSeek(globalTime);
               }}
               onPointerDown={(event) => {
                 event.stopPropagation();
-                const initialTime = key.time;
+                const initialLocalTime = key.time;
                 const baseX = event.clientX;
                 const move = (pointerEvent: PointerEvent) => {
                   const deltaPx = pointerEvent.clientX - baseX;
-                  const nextTime = clampTime(toTime(xForTime(initialTime) + deltaPx));
-                  moveKeyframe(node.id, property, initialTime, nextTime);
+                  const deltaTime = deltaPx / pixelsPerSecond;
+                  // New local time, clamped to clip
+                  const newLocalTime = clampKeyframeTime(initialLocalTime + deltaTime, node);
+                  moveKeyframe(node.id, property, initialLocalTime, newLocalTime);
                 };
                 const up = () => {
                   window.removeEventListener('pointermove', move as unknown as EventListener);

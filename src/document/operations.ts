@@ -39,6 +39,8 @@ export function addNode(
     visible: overrides.visible ?? true,
     locked: overrides.locked ?? false,
     animation: overrides.animation ?? defaultNodeAnimation(),
+    startTime: overrides.startTime ?? 0,
+    endTime: overrides.endTime ?? doc.composition.duration,
   };
 
   const newNodes = { ...doc.nodes, [id]: node };
@@ -260,6 +262,27 @@ export function setNodePropertyAnimation(
             },
           },
         },
+      },
+    },
+  };
+}
+
+export function updateNodeTiming(
+  doc: Document,
+  nodeId: string,
+  updates: { startTime?: number; endTime?: number },
+): Document {
+  const node = doc.nodes[nodeId];
+  if (!node) return doc;
+
+  return {
+    ...doc,
+    nodes: {
+      ...doc.nodes,
+      [nodeId]: {
+        ...node,
+        startTime: updates.startTime ?? node.startTime,
+        endTime: updates.endTime ?? node.endTime,
       },
     },
   };
