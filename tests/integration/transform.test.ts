@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { defaultTransform } from '@/engine/transform/transform';
 import { beginDrag, updateDrag } from '@/engine/interaction/dragInteraction';
 import { beginResize, updateResize } from '@/engine/interaction/resizeInteraction';
+import { resolveResizeSnap } from '@/engine/interaction/resizeSnap';
 import { beginRotate, updateRotate } from '@/engine/interaction/rotateInteraction';
 import { vec2 } from '@/engine/transform/math';
-import { computeLocalMatrix, getWorldAnchor, localToWorld } from '@/engine/transform';
+import { computeLocalMatrix, getWorldAnchor, getWorldCorners, localToWorld } from '@/engine/transform';
+import { getBoundsFromPoints, getCanvasBounds } from '@/engine/interaction/snapEngine';
 
 const NO_MOD = { shift: false, alt: false };
 
@@ -154,6 +156,55 @@ describe('Resize interaction', () => {
     const after = { ...t, ...result };
     const afterMatrix = computeLocalMatrix(after);
     const fixedAfter = localToWorld(afterMatrix, vec2(0, after.height / 2));
+    expect(fixedAfter.x).toBeCloseTo(fixedBefore.x, 6);
+    expect(fixedAfter.y).toBeCloseTo(fixedBefore.y, 6);
+  });
+
+  it('keeps opposite corner fixed when rotated resize snaps', () => {
+    const t = {
+      ...defaultTransform(),
+      x: 220,
+      y: 180,
+      width: 180,
+      height: 120,
+      rotation: 15,
+      anchorX: 0.5,
+      anchorY: 0.5,
+    };
+    const startMatrix = computeLocalMatrix(t);
+    const startHandle = localToWorld(startMatrix, vec2(t.width, t.height));
+    const fixedBefore = localToWorld(startMatrix, vec2(0, 0));
+    const state = beginResize('bottom-right', startHandle, 'a', t);
+
+    const pointer = vec2(startHandle.x + 40, startHandle.y + 20);
+    const proposed = updateResize(state, pointer, NO_MOD);
+    const proposedTransform = { ...t, ...proposed };
+    const proposedBounds = getBoundsFromPoints(
+      getWorldCorners(proposedTransform, computeLocalMatrix(proposedTransform)),
+    );
+    const staticTarget = {
+      left: proposedBounds.right + 10,
+      right: proposedBounds.right + 110,
+      top: proposedBounds.top - 50,
+      bottom: proposedBounds.bottom + 50,
+      centerX: proposedBounds.right + 60,
+      centerY: (proposedBounds.top + proposedBounds.bottom) / 2,
+    };
+
+    const snapped = resolveResizeSnap(
+      state,
+      pointer,
+      NO_MOD,
+      proposed,
+      [staticTarget],
+      getCanvasBounds(2000, 2000),
+      12,
+    );
+
+    expect(snapped.guides.length).toBeGreaterThan(0);
+    const after = { ...t, ...snapped.transform };
+    const afterMatrix = computeLocalMatrix(after);
+    const fixedAfter = localToWorld(afterMatrix, vec2(0, 0));
     expect(fixedAfter.x).toBeCloseTo(fixedBefore.x, 6);
     expect(fixedAfter.y).toBeCloseTo(fixedBefore.y, 6);
   });
