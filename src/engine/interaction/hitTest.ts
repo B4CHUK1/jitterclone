@@ -83,8 +83,8 @@ export interface HandleHit {
 
 const HANDLE_SIZE = 8;
 const HANDLE_HIT_AREA = 12;
-const ROTATION_OFFSET = 16;
-const ROTATION_HIT_AREA = 14;
+const ROTATION_OFFSET = 20;
+const ROTATION_HIT_AREA = 18;
 
 export function hitTestHandles(
   screenCorners: [Vec2, Vec2, Vec2, Vec2],
@@ -104,10 +104,10 @@ export function hitTestHandles(
 
   // Check rotation handles first (they're outside the box)
   const rotHandles: { pos: Vec2; type: HandleType; cursor: string }[] = [
-    { pos: rotationCorners[0], type: 'rotate-top-left', cursor: 'grab' },
-    { pos: rotationCorners[1], type: 'rotate-top-right', cursor: 'grab' },
-    { pos: rotationCorners[2], type: 'rotate-bottom-right', cursor: 'grab' },
-    { pos: rotationCorners[3], type: 'rotate-bottom-left', cursor: 'grab' },
+    { pos: rotationCorners[0], type: 'rotate-top-left', cursor: 'crosshair' },
+    { pos: rotationCorners[1], type: 'rotate-top-right', cursor: 'crosshair' },
+    { pos: rotationCorners[2], type: 'rotate-bottom-right', cursor: 'crosshair' },
+    { pos: rotationCorners[3], type: 'rotate-bottom-left', cursor: 'crosshair' },
   ];
 
   for (const h of rotHandles) {

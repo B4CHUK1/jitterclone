@@ -3,8 +3,16 @@
  * These produce new document states (immutable approach).
  */
 
-import type { Document, SceneNode, NodeType, NodeStyle } from './types';
-import { generateId, defaultStyle } from './types';
+import type {
+  AnimatableProperty,
+  Document,
+  Keyframe,
+  NodeStyle,
+  NodeType,
+  SceneNode,
+  Composition,
+} from './types';
+import { generateId, defaultNodeAnimation, defaultStyle } from './types';
 import { defaultTransform, type Transform } from '@/engine/transform';
 
 export function addNode(
@@ -29,6 +37,7 @@ export function addNode(
     style: overrides.style ?? defaultStyle(),
     visible: overrides.visible ?? true,
     locked: overrides.locked ?? false,
+    animation: overrides.animation ?? defaultNodeAnimation(),
   };
 
   const newNodes = { ...doc.nodes, [id]: node };
@@ -140,6 +149,79 @@ export function updateNodeProps(
     nodes: {
       ...doc.nodes,
       [nodeId]: { ...node, ...updates },
+    },
+  };
+}
+
+export function updateComposition(
+  doc: Document,
+  updates: Partial<Pick<Composition, 'name' | 'width' | 'height' | 'background' | 'duration' | 'fps'>>,
+): Document {
+  const nextComposition = {
+    ...doc.composition,
+    ...updates,
+  };
+  return {
+    ...doc,
+    composition: nextComposition,
+    width: nextComposition.width,
+    height: nextComposition.height,
+  };
+}
+
+export function setNodeKeyframe(
+  doc: Document,
+  nodeId: string,
+  property: AnimatableProperty,
+  keyframe: Keyframe,
+): Document {
+  const node = doc.nodes[nodeId];
+  if (!node) return doc;
+  const existing = node.animation.tracks[property] ?? [];
+  const filtered = existing.filter((k) => Math.abs(k.time - keyframe.time) > 1e-6);
+  const nextTrack = [...filtered, keyframe].sort((a, b) => a.time - b.time);
+
+  return {
+    ...doc,
+    nodes: {
+      ...doc.nodes,
+      [nodeId]: {
+        ...node,
+        animation: {
+          tracks: {
+            ...node.animation.tracks,
+            [property]: nextTrack,
+          },
+        },
+      },
+    },
+  };
+}
+
+export function removeNodeKeyframe(
+  doc: Document,
+  nodeId: string,
+  property: AnimatableProperty,
+  time: number,
+): Document {
+  const node = doc.nodes[nodeId];
+  if (!node) return doc;
+  const existing = node.animation.tracks[property] ?? [];
+  const nextTrack = existing.filter((k) => Math.abs(k.time - time) > 1e-6);
+
+  return {
+    ...doc,
+    nodes: {
+      ...doc.nodes,
+      [nodeId]: {
+        ...node,
+        animation: {
+          tracks: {
+            ...node.animation.tracks,
+            [property]: nextTrack,
+          },
+        },
+      },
     },
   };
 }

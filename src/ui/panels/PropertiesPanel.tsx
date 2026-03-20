@@ -10,7 +10,9 @@ import {
 } from '@/engine/interaction/arrangeActions';
 import { getRenderNodeBounds } from '@/engine/interaction/snapEngine';
 import type { Document } from '@/document/types';
-import { useEditorStore, useDocumentStore } from '@/state';
+import type { AnimatableProperty } from '@/document/types';
+import { hasKeyframeAtTime } from '@/engine/animation';
+import { useEditorStore, useDocumentStore, useTimelineStore } from '@/state';
 import { NumericInput } from '@/ui/components/NumericInput';
 import styles from './PropertiesPanel.module.css';
 
@@ -20,11 +22,76 @@ export function PropertiesPanel() {
   const updateTransform = useDocumentStore((s) => s.updateTransform);
   const updateTransforms = useDocumentStore((s) => s.updateTransforms);
   const updateStyle = useDocumentStore((s) => s.updateStyle);
+  const updateComposition = useDocumentStore((s) => s.updateComposition);
+  const setKeyframe = useDocumentStore((s) => s.setKeyframe);
+  const removeKeyframe = useDocumentStore((s) => s.removeKeyframe);
+  const currentTime = useTimelineStore((s) => s.currentTime);
 
   if (selectedIds.size === 0) {
     return (
       <div className={styles.panel}>
-        <div className={styles.empty}>No selection</div>
+        <div className={styles.section}>
+          <div className={styles.sectionTitle}>Composition</div>
+          <div className={styles.row}>
+            <div className={styles.field}>
+              <span className={styles.fieldLabel}>Width</span>
+              <NumericInput
+                className={styles.fieldInput}
+                label="Composition width"
+                value={document.composition.width}
+                min={1}
+                onChange={(v) => updateComposition({ width: Math.max(1, Math.round(v)) })}
+              />
+            </div>
+            <div className={styles.field}>
+              <span className={styles.fieldLabel}>Height</span>
+              <NumericInput
+                className={styles.fieldInput}
+                label="Composition height"
+                value={document.composition.height}
+                min={1}
+                onChange={(v) => updateComposition({ height: Math.max(1, Math.round(v)) })}
+              />
+            </div>
+          </div>
+          <div className={styles.row}>
+            <div className={styles.field}>
+              <span className={styles.fieldLabel}>Duration (s)</span>
+              <NumericInput
+                className={styles.fieldInput}
+                label="Composition duration"
+                value={document.composition.duration}
+                min={0.1}
+                precision={2}
+                onChange={(v) => updateComposition({ duration: Math.max(0.1, v) })}
+              />
+            </div>
+            <div className={styles.field}>
+              <span className={styles.fieldLabel}>FPS</span>
+              <NumericInput
+                className={styles.fieldInput}
+                label="Composition FPS"
+                value={document.composition.fps}
+                min={1}
+                onChange={(v) => updateComposition({ fps: Math.max(1, Math.round(v)) })}
+              />
+            </div>
+          </div>
+          <div className={styles.colorRow}>
+            <input
+              className={styles.colorSwatch}
+              type="color"
+              value={document.composition.background}
+              onChange={(e) => updateComposition({ background: e.target.value })}
+            />
+            <input
+              className={styles.colorInput}
+              type="text"
+              value={document.composition.background}
+              onChange={(e) => updateComposition({ background: e.target.value })}
+            />
+          </div>
+        </div>
       </div>
     );
   }
@@ -140,6 +207,14 @@ export function PropertiesPanel() {
   const t = node.transform;
   const s = node.style;
 
+  const toggleKey = (property: AnimatableProperty, value: number) => {
+    if (hasKeyframeAtTime(node, property, currentTime)) {
+      removeKeyframe(nodeId, property, currentTime);
+      return;
+    }
+    setKeyframe(nodeId, property, currentTime, value);
+  };
+
   return (
     <div className={styles.panel}>
       {/* Transform */}
@@ -154,6 +229,7 @@ export function PropertiesPanel() {
               value={t.x}
               onChange={(v) => updateTransform(nodeId, { x: v })}
             />
+            <button className={styles.actionButton} type="button" onClick={() => toggleKey('x', t.x)}>K</button>
           </div>
           <div className={styles.field}>
             <span className={styles.fieldLabel}>Y</span>
@@ -163,6 +239,7 @@ export function PropertiesPanel() {
               value={t.y}
               onChange={(v) => updateTransform(nodeId, { y: v })}
             />
+            <button className={styles.actionButton} type="button" onClick={() => toggleKey('y', t.y)}>K</button>
           </div>
         </div>
         <div className={styles.row}>
@@ -197,6 +274,19 @@ export function PropertiesPanel() {
               onChange={(v) => updateTransform(nodeId, { rotation: v })}
               precision={1}
             />
+            <button className={styles.actionButton} type="button" onClick={() => toggleKey('rotation', t.rotation)}>K</button>
+          </div>
+        </div>
+        <div className={styles.row}>
+          <div className={styles.field}>
+            <span className={styles.fieldLabel}>Scale X</span>
+            <NumericInput className={styles.fieldInput} label="Scale X" value={t.scaleX} onChange={(v) => updateTransform(nodeId, { scaleX: v })} precision={3} />
+            <button className={styles.actionButton} type="button" onClick={() => toggleKey('scaleX', t.scaleX)}>K</button>
+          </div>
+          <div className={styles.field}>
+            <span className={styles.fieldLabel}>Scale Y</span>
+            <NumericInput className={styles.fieldInput} label="Scale Y" value={t.scaleY} onChange={(v) => updateTransform(nodeId, { scaleY: v })} precision={3} />
+            <button className={styles.actionButton} type="button" onClick={() => toggleKey('scaleY', t.scaleY)}>K</button>
           </div>
         </div>
       </div>
@@ -236,6 +326,7 @@ export function PropertiesPanel() {
               min={0}
               max={100}
             />
+            <button className={styles.actionButton} type="button" onClick={() => toggleKey('opacity', s.opacity)}>K</button>
           </div>
         </div>
       </div>

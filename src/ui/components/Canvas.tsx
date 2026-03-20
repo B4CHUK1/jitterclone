@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { PixiRenderer } from '@/engine/renderer';
 import { buildSceneGraph, findRenderNode } from '@/engine/scene';
-import { hitTestPoint, hitTestRect } from '@/engine/interaction/hitTest';
+import { hitTestHandles, hitTestPoint, hitTestRect } from '@/engine/interaction/hitTest';
 import { beginDrag, updateDrag } from '@/engine/interaction/dragInteraction';
 import {
   beginResize,
@@ -33,6 +33,8 @@ import {
 } from '@/engine/interaction/snapEngine';
 import { resolveResizeSnap } from '@/engine/interaction/resizeSnap';
 import { useDocumentStore, useEditorStore, useViewportStore } from '@/state';
+import { useTimelineStore } from '@/state';
+import { evaluateDocumentAtTime } from '@/engine/animation';
 import { SelectionOverlay } from '@/ui/overlays/SelectionOverlay';
 import { SnapOverlay } from '@/ui/overlays/SnapOverlay';
 import { RotateTooltipOverlay } from '@/ui/overlays/RotateTooltipOverlay';
@@ -89,6 +91,8 @@ export function Canvas() {
   const tick = useCallback(() => setRenderTick((t) => t + 1), []);
 
   const doc = useDocumentStore((s) => s.document);
+  const currentTime = useTimelineStore((s) => s.currentTime);
+  const evaluatedDoc = evaluateDocumentAtTime(doc, currentTime);
   const updateTransform = useDocumentStore((s) => s.updateTransform);
   const updateTransforms = useDocumentStore((s) => s.updateTransforms);
   const selectedIds = useEditorStore((s) => s.selectedIds);
@@ -109,7 +113,7 @@ export function Canvas() {
   const worldToScreen = useViewportStore((s) => s.worldToScreen);
 
   // ── Helpers ──
-  const getScene = useCallback(() => buildSceneGraph(doc), [doc]);
+  const getScene = useCallback(() => buildSceneGraph(evaluatedDoc), [evaluatedDoc]);
 
   const clientToScreen = useCallback(
     (clientX: number, clientY: number): Vec2 => {
@@ -169,7 +173,7 @@ export function Canvas() {
       })
       .then(() => {
         setContainerSize(rect.width, rect.height);
-        resetView(doc.width, doc.height);
+        resetView(doc.composition.width, doc.composition.height);
         tick();
       });
 
@@ -197,11 +201,15 @@ export function Canvas() {
     if (!renderer?.ready) return;
 
     renderer.setViewportTransform(panX, panY, zoom);
-    renderer.renderDocBackground(doc.width, doc.height);
+    renderer.renderDocBackground(
+      doc.composition.width,
+      doc.composition.height,
+      doc.composition.background,
+    );
 
-    const sceneRoots = buildSceneGraph(doc);
+    const sceneRoots = buildSceneGraph(evaluatedDoc);
     renderer.render(sceneRoots);
-  }, [doc, panX, panY, zoom]);
+  }, [doc.composition.width, doc.composition.height, doc.composition.background, evaluatedDoc, panX, panY, zoom]);
 
   // ── Marquee rect for overlay ──
   const [marqueeScreenRect, setMarqueeScreenRect] = useState<{
@@ -248,9 +256,9 @@ export function Canvas() {
           const corners = getWorldCorners(rn.node.transform, rn.worldMatrix);
           const screenCorners = corners.map(worldToScreen) as [Vec2, Vec2, Vec2, Vec2];
 
-          const handleHit = hitTestScreenHandles(screenCorners, screen);
+          const handleHit = hitTestHandles(screenCorners, screen);
           if (handleHit) {
-            setHoverCursor(handleHit.cursor);
+            setHoverCursor(handleHit.type.startsWith('rotate-') ? ROTATE_CURSOR : handleHit.cursor);
             return;
           }
         }
@@ -267,6 +275,74 @@ export function Canvas() {
       }
     },
     [clientToScreen, selectedIds, getScene, worldToScreen, screenToWorld],
+  );
+
+  const startHandleInteraction = useCallback(
+    (e: React.PointerEvent, handle: string) => {
+      e.stopPropagation();
+      e.preventDefault();
+
+      const screen = clientToScreen(e.clientX, e.clientY);
+      const world = screenToWorld(screen);
+
+      const nodeId = [...selectedIds][0];
+      if (!nodeId) return;
+      const node = evaluatedDoc.nodes[nodeId];
+      if (!node) return;
+      const scene = getScene();
+      const renderNode = findRenderNode(scene, nodeId);
+
+      pointerIdRef.current = e.pointerId;
+      containerRef.current?.setPointerCapture(e.pointerId);
+
+      if (handle.startsWith('rotate-')) {
+        const rotateTargets = [...selectedIds]
+          .map((id) => {
+            const targetNode = evaluatedDoc.nodes[id];
+            const targetRenderNode = findRenderNode(scene, id);
+            if (!targetNode || !targetRenderNode) return null;
+            return {
+              nodeId: id,
+              transform: targetNode.transform,
+              worldMatrix: targetRenderNode.worldMatrix,
+            };
+          })
+          .filter((target): target is NonNullable<typeof target> => target !== null);
+
+        if (rotateTargets.length === 0) return;
+        rotateStateRef.current = beginRotate(world, rotateTargets);
+        phaseRef.current = 'rotating';
+        setInteractionCursor(ROTATE_CURSOR);
+        setRotateTooltip({
+          client: { x: e.clientX, y: e.clientY },
+          angle: node.transform.rotation,
+          snapped: false,
+        });
+      } else {
+        const handleCursor = renderNode
+          ? getResizeCursorForHandle(
+              handle,
+              getWorldCorners(renderNode.node.transform, renderNode.worldMatrix).map(worldToScreen) as [
+                Vec2,
+                Vec2,
+                Vec2,
+                Vec2,
+              ],
+            )
+          : getResizeCursor(handle);
+        resizeStateRef.current = beginResize(
+          handle as ResizeHandle,
+          world,
+          nodeId,
+          node.transform,
+        );
+        phaseRef.current = 'resizing';
+        const staticBounds = getStaticBounds(scene, new Set([nodeId]));
+        resizeStaticBoundsRef.current = staticBounds;
+        setInteractionCursor(handleCursor);
+      }
+    },
+    [clientToScreen, screenToWorld, selectedIds, evaluatedDoc.nodes, getScene, worldToScreen],
   );
 
   // ── POINTER DOWN on canvas ──
@@ -287,6 +363,26 @@ export function Canvas() {
       const screen = clientToScreen(e.clientX, e.clientY);
       const world = screenToWorld(screen);
       const scene = getScene();
+      const firstSelectedId = [...selectedIds][0];
+      if (firstSelectedId) {
+        const selectedNode = findRenderNode(scene, firstSelectedId);
+        if (selectedNode) {
+          const handleHit = hitTestHandles(
+            getWorldCorners(selectedNode.node.transform, selectedNode.worldMatrix).map(worldToScreen) as [
+              Vec2,
+              Vec2,
+              Vec2,
+              Vec2,
+            ],
+            screen,
+          );
+
+          if (handleHit) {
+            startHandleInteraction(e, handleHit.type);
+            return;
+          }
+        }
+      }
       const hit = hitTestPoint(scene, world);
 
       startClientRef.current = { x: e.clientX, y: e.clientY };
@@ -294,12 +390,10 @@ export function Canvas() {
       containerRef.current?.setPointerCapture(e.pointerId);
 
       if (hit) {
-        // Clicked on an element — enter pending-drag (wait for threshold)
         pendingHitIdRef.current = hit.node.id;
         pendingShiftRef.current = e.shiftKey;
         phaseRef.current = 'pending-drag';
       } else {
-        // Clicked empty space — enter pending-marquee
         if (!e.shiftKey) {
           deselectAll();
         }
@@ -309,7 +403,7 @@ export function Canvas() {
 
       tick();
     },
-    [activeTool, clientToScreen, screenToWorld, getScene, deselectAll, tick],
+    [activeTool, clientToScreen, screenToWorld, getScene, deselectAll, tick, selectedIds, worldToScreen, startHandleInteraction],
   );
 
   // ── POINTER MOVE ──
@@ -396,7 +490,7 @@ export function Canvas() {
             const snap = resolveBoundsSnapping(
               movingBounds,
               staticBounds,
-              getCanvasBounds(doc.width, doc.height),
+              getCanvasBounds(doc.composition.width, doc.composition.height),
               threshold,
             );
             for (const [id, pos] of updates) {
@@ -425,7 +519,7 @@ export function Canvas() {
           mods,
           updates,
           resizeStaticBoundsRef.current,
-          getCanvasBounds(doc.width, doc.height),
+          getCanvasBounds(doc.composition.width, doc.composition.height),
           SNAP_THRESHOLD_SCREEN_PX / zoom,
         );
         updateTransform(resizeStateRef.current.nodeId, snapped.transform);
@@ -480,8 +574,8 @@ export function Canvas() {
       toggleSelect,
       doc.nodes,
       updateTransform,
-      doc.width,
-      doc.height,
+      doc.composition.width,
+      doc.composition.height,
       zoom,
       getScene,
       selectMultiple,
@@ -538,74 +632,7 @@ export function Canvas() {
   }, [resetInteraction]);
 
   // ── Handle pointer down on selection handles (from overlay) ──
-  const handleHandlePointerDown = useCallback(
-    (e: React.PointerEvent, handle: string) => {
-      e.stopPropagation();
-      e.preventDefault();
-
-      const screen = clientToScreen(e.clientX, e.clientY);
-      const world = screenToWorld(screen);
-
-      const nodeId = [...selectedIds][0];
-      if (!nodeId) return;
-      const node = doc.nodes[nodeId];
-      if (!node) return;
-      const scene = getScene();
-      const renderNode = findRenderNode(scene, nodeId);
-
-      pointerIdRef.current = e.pointerId;
-      containerRef.current?.setPointerCapture(e.pointerId);
-
-      if (handle.startsWith('rotate-')) {
-        const rotateTargets = [...selectedIds]
-          .map((id) => {
-            const targetNode = doc.nodes[id];
-            const targetRenderNode = findRenderNode(scene, id);
-            if (!targetNode || !targetRenderNode) return null;
-            return {
-              nodeId: id,
-              transform: targetNode.transform,
-              worldMatrix: targetRenderNode.worldMatrix,
-            };
-          })
-          .filter((target): target is NonNullable<typeof target> => target !== null);
-
-        if (rotateTargets.length === 0) return;
-        rotateStateRef.current = beginRotate(world, rotateTargets);
-        phaseRef.current = 'rotating';
-        setInteractionCursor(ROTATE_CURSOR);
-        setRotateTooltip({
-          client: { x: e.clientX, y: e.clientY },
-          angle: node.transform.rotation,
-          snapped: false,
-        });
-      } else {
-        const handleCursor = renderNode
-          ? getResizeCursorForHandle(
-              handle,
-              getWorldCorners(renderNode.node.transform, renderNode.worldMatrix).map(worldToScreen) as [
-                Vec2,
-                Vec2,
-                Vec2,
-                Vec2,
-              ],
-            )
-          : getResizeCursor(handle);
-        resizeStateRef.current = beginResize(
-          handle as ResizeHandle,
-          world,
-          nodeId,
-          node.transform,
-        );
-        phaseRef.current = 'resizing';
-        const staticBounds = getStaticBounds(scene, new Set([nodeId]));
-        resizeStaticBoundsRef.current = staticBounds;
-        // Set cursor matching the handle direction
-        setInteractionCursor(handleCursor);
-      }
-    },
-    [clientToScreen, screenToWorld, selectedIds, doc.nodes, getScene, worldToScreen],
-  );
+  const handleHandlePointerDown = startHandleInteraction;
 
   // ── Selected render nodes for overlay ──
   const selectedRenderNodes: RenderNode[] = (() => {
@@ -722,114 +749,6 @@ function getResizeCursorForHandle(
   return getResizeCursorFromDirection({ x: p.x - center.x, y: p.y - center.y });
 }
 
-/**
- * Lightweight screen-space handle hit testing for hover cursor.
- * Tests corners, edges, and rotation zones.
- */
-function hitTestScreenHandles(
-  screenCorners: [Vec2, Vec2, Vec2, Vec2],
-  screenPoint: Vec2,
-): { cursor: string } | null {
-  const [tl, tr, br, bl] = screenCorners;
-  const CORNER_RADIUS = 12;
-  const EDGE_DIST = 8;
-  const ROT_OFFSET = 22;
-  const ROT_RADIUS = 14;
-
-  const center = {
-    x: (tl.x + tr.x + br.x + bl.x) / 4,
-    y: (tl.y + tr.y + br.y + bl.y) / 4,
-  };
-
-  // Check rotation zones first (outside corners)
-  const rotCorners = [tl, tr, br, bl].map((c) => {
-    const dx = c.x - center.x;
-    const dy = c.y - center.y;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    if (len === 0) return c;
-    const factor = (len + ROT_OFFSET) / len;
-    return { x: center.x + dx * factor, y: center.y + dy * factor };
-  });
-
-  for (const rc of rotCorners) {
-    if (dist(screenPoint, rc) <= ROT_RADIUS) {
-      return { cursor: ROTATE_CURSOR };
-    }
-  }
-
-  // Corner handles
-  const corners = [
-    { pos: tl, cursor: getResizeCursorFromDirection({ x: tl.x - center.x, y: tl.y - center.y }) },
-    { pos: tr, cursor: getResizeCursorFromDirection({ x: tr.x - center.x, y: tr.y - center.y }) },
-    { pos: br, cursor: getResizeCursorFromDirection({ x: br.x - center.x, y: br.y - center.y }) },
-    { pos: bl, cursor: getResizeCursorFromDirection({ x: bl.x - center.x, y: bl.y - center.y }) },
-  ];
-  for (const c of corners) {
-    if (dist(screenPoint, c.pos) <= CORNER_RADIUS) {
-      return { cursor: c.cursor };
-    }
-  }
-
-  // Edge proximity
-  const edges = [
-    {
-      a: tl,
-      b: tr,
-      cursor: getResizeCursorFromDirection({
-        x: (tl.x + tr.x) / 2 - center.x,
-        y: (tl.y + tr.y) / 2 - center.y,
-      }),
-    },
-    {
-      a: tr,
-      b: br,
-      cursor: getResizeCursorFromDirection({
-        x: (tr.x + br.x) / 2 - center.x,
-        y: (tr.y + br.y) / 2 - center.y,
-      }),
-    },
-    {
-      a: br,
-      b: bl,
-      cursor: getResizeCursorFromDirection({
-        x: (br.x + bl.x) / 2 - center.x,
-        y: (br.y + bl.y) / 2 - center.y,
-      }),
-    },
-    {
-      a: bl,
-      b: tl,
-      cursor: getResizeCursorFromDirection({
-        x: (bl.x + tl.x) / 2 - center.x,
-        y: (bl.y + tl.y) / 2 - center.y,
-      }),
-    },
-  ];
-  for (const edge of edges) {
-    if (distToSegment(screenPoint, edge.a, edge.b) <= EDGE_DIST) {
-      return { cursor: edge.cursor };
-    }
-  }
-
-  return null;
-}
-
 function midpoint(a: Vec2, b: Vec2): Vec2 {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-}
-
-function dist(a: Vec2, b: Vec2): number {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
-function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq === 0) return dist(p, a);
-  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
-  t = Math.max(0, Math.min(1, t));
-  return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
 }

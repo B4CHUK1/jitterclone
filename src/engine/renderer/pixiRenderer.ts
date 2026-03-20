@@ -71,7 +71,7 @@ export class PixiRenderer {
   /**
    * Render the document background (artboard).
    */
-  renderDocBackground(docWidth: number, docHeight: number, color: number = 0x1a1a2e): void {
+  renderDocBackground(docWidth: number, docHeight: number, color: number | string = 0x1a1a2e): void {
     this.docBackground.clear();
     this.docBackground.rect(0, 0, docWidth, docHeight);
     this.docBackground.fill({ color });

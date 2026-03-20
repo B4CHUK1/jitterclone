@@ -2,7 +2,8 @@ import { useEffect } from 'react';
 import { Toolbar } from '@/ui/components/Toolbar';
 import { Canvas } from '@/ui/components/Canvas';
 import { PropertiesPanel } from '@/ui/panels/PropertiesPanel';
-import { useDocumentStore, useEditorStore } from '@/state';
+import { TimelinePanel } from '@/ui/panels/TimelinePanel';
+import { useDocumentStore, useEditorStore, useTimelineStore } from '@/state';
 import styles from './App.module.css';
 
 export function App() {
@@ -10,6 +11,9 @@ export function App() {
   const deselectAll = useEditorStore((s) => s.deselectAll);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const removeNode = useDocumentStore((s) => s.removeNode);
+  const composition = useDocumentStore((s) => s.document.composition);
+  const isPlaying = useTimelineStore((s) => s.isPlaying);
+  const pause = useTimelineStore((s) => s.pause);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -52,11 +56,37 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [setTool, deselectAll, selectedIds, removeNode]);
 
+  useEffect(() => {
+    if (!isPlaying) return;
+    let frameId = 0;
+    let last = performance.now();
+
+    const tick = (now: number) => {
+      const dt = (now - last) / 1000;
+      last = now;
+      useTimelineStore.setState((state) => {
+        const next = state.currentTime + dt;
+        if (next >= composition.duration) {
+          pause();
+          return { currentTime: composition.duration };
+        }
+        return { currentTime: next };
+      });
+      frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
+  }, [isPlaying, composition.duration, pause]);
+
   return (
     <div className={styles.app}>
       <Toolbar />
       <div className={styles.main}>
-        <Canvas />
+        <div className={styles.workspace}>
+          <Canvas />
+          <TimelinePanel />
+        </div>
         <PropertiesPanel />
       </div>
     </div>

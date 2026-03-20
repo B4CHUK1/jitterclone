@@ -110,7 +110,7 @@ function SelectionBox({
   ];
 
   // Rotation handles — offset outward from corners
-  const rotOffset = 22;
+  const rotOffset = 20;
   const rotHandles = [
     { pos: offsetFromCenter(tl, center, rotOffset), handle: 'rotate-top-left' },
     { pos: offsetFromCenter(tr, center, rotOffset), handle: 'rotate-top-right' },
