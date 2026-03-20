@@ -54,6 +54,9 @@ export function App() {
         case 'p':
           setTool('polygon');
           break;
+        case 's':
+          setTool('star');
+          break;
         case 'l':
           setTool('line');
           break;

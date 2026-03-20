@@ -152,21 +152,19 @@ export class PixiRenderer {
     const sign = worldMatrix.a * worldMatrix.d - worldMatrix.b * worldMatrix.c < 0 ? -1 : 1;
     gfx.scale.set(scaleX, sign * scaleY);
 
-    gfx.alpha = node.style.opacity;
+    gfx.alpha = node.style?.opacity ?? 1;
 
-    // Apply blend mode
-    const blendMode = node.style.blendMode ?? 'normal';
-    gfx.blendMode = BLEND_MODE_MAP[blendMode] as unknown as import('pixi.js').BLEND_MODES;
+    // Apply blend mode (PixiJS 8 accepts string values directly)
+    const blendMode = node.style?.blendMode ?? 'normal';
+    const pixiBlendMode = BLEND_MODE_MAP[blendMode] ?? 'normal';
+    gfx.blendMode = pixiBlendMode as never;
 
     this.drawShape(gfx, node);
-
-    // Apply effects (drop shadow rendered as separate graphics)
-    this.applyEffects(gfx, node);
   }
 
   private drawShapePath(gfx: Graphics, node: SceneNode): void {
     const { width, height } = node.transform;
-    const { cornerRadius } = node.style;
+    const cornerRadius = node.style?.cornerRadius ?? 0;
 
     switch (node.type) {
       case 'ellipse':
@@ -223,7 +221,10 @@ export class PixiRenderer {
   }
 
   private drawShape(gfx: Graphics, node: SceneNode): void {
-    const { fill, stroke } = node.style;
+    const fill = node.style?.fill;
+    const stroke = node.style?.stroke;
+
+    if (!fill) return;
 
     // Fill
     if (fill.opacity > 0 && node.type !== 'line') {
@@ -238,23 +239,9 @@ export class PixiRenderer {
     } else if (node.type === 'line') {
       // Lines always need a stroke
       this.drawShapePath(gfx, node);
-      const color = stroke?.color ?? fill.color;
-      gfx.stroke({ color, alpha: stroke?.opacity ?? fill.opacity, width: stroke?.width ?? 2 });
+      const color = stroke?.color ?? fill.color ?? '#ffffff';
+      gfx.stroke({ color, alpha: stroke?.opacity ?? fill.opacity ?? 1, width: stroke?.width ?? 2 });
     }
-  }
-
-  private applyEffects(gfx: Graphics, node: SceneNode): void {
-    const effects = node.style.effects;
-    if (!effects || effects.length === 0) {
-      gfx.filters = [];
-      return;
-    }
-
-    // We use PixiJS built-in filter capabilities
-    // For now, implement drop shadow and blur as simple visual effects
-    // by drawing additional shapes (PixiJS 8 filter API varies)
-    // Keep it simple: no external filter deps needed
-    gfx.filters = [];
   }
 
   getGraphicsForNode(nodeId: string): Graphics | undefined {
