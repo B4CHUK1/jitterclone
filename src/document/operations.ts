@@ -315,6 +315,10 @@ export function reparentNode(
   };
 }
 
+export function reorderRootNodes(doc: Document, orderedIds: string[]): Document {
+  return { ...doc, rootNodeIds: orderedIds };
+}
+
 export function getChildren(doc: Document, parentId: string | null): SceneNode[] {
   return Object.values(doc.nodes)
     .filter((n) => n.parentId === parentId)

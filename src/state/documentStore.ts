@@ -29,6 +29,7 @@ import {
   removeNodeKeyframe,
   setNodePropertyAnimation,
   updateNodeTiming,
+  reorderRootNodes,
 } from '@/document/operations';
 import type { Transform } from '@/engine/transform';
 import {
@@ -80,6 +81,9 @@ interface DocumentState {
 
   /** Update clip timing (startTime/endTime) */
   updateTiming: (nodeId: string, updates: { startTime?: number; endTime?: number }) => void;
+
+  /** Reorder root layer ids */
+  reorderLayers: (orderedIds: string[]) => void;
 
   getNode: (nodeId: string) => SceneNode | undefined;
   reset: (doc?: Document) => void;
@@ -233,6 +237,10 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   updateTiming: (nodeId, updates) => {
     set({ document: updateNodeTiming(get().document, nodeId, updates) });
+  },
+
+  reorderLayers: (orderedIds) => {
+    set({ document: reorderRootNodes(get().document, orderedIds) });
   },
 
   getNode: (nodeId) => {

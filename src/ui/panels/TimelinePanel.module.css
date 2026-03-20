@@ -1,18 +1,23 @@
+/* ── Timeline root ── */
 .timeline {
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   height: 340px;
   display: flex;
   flex-direction: column;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
+/* ── Header / transport bar ── */
 .header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 6px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--color-border);
   flex-wrap: wrap;
+  user-select: none;
 }
 
 .playButton,
@@ -25,6 +30,22 @@
   border-radius: 4px;
   padding: 3px 8px;
   font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.playButton:hover,
+.miniButton:hover,
+.stopwatchButton:hover,
+.expandButton:hover {
+  background: color-mix(in srgb, var(--color-bg-tertiary) 70%, white);
+}
+
+.playButton:active,
+.miniButton:active,
+.stopwatchButton:active,
+.expandButton:active {
+  background: color-mix(in srgb, var(--color-bg-tertiary) 50%, white);
 }
 
 .playButton {
@@ -32,22 +53,28 @@
 }
 
 .timeReadout {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
+/* ── Viewport (scrollable area) ── */
 .viewport {
   flex: 1;
   overflow: auto;
-  cursor: ew-resize;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
 }
 
+/* ── Timeline space (virtual canvas) ── */
 .timelineSpace {
   position: relative;
   min-height: 100%;
   background: color-mix(in srgb, var(--color-bg-tertiary) 40%, black);
 }
 
+/* ── Row grid ── */
 .row {
   position: absolute;
   left: 0;
@@ -56,6 +83,7 @@
   grid-template-columns: 240px 1fr;
 }
 
+/* ── Label cells (sticky left column) ── */
 .labelCell {
   position: sticky;
   left: 0;
@@ -76,16 +104,20 @@
   letter-spacing: 0.04em;
 }
 
+/* ── Time cells (right column) ── */
 .timeCell {
   position: relative;
   border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
   background: color-mix(in srgb, var(--color-bg-tertiary) 70%, black);
+  overflow: hidden;
 }
 
 .rulerCell {
   background: color-mix(in srgb, var(--color-bg-secondary) 65%, black);
+  overflow: visible;
 }
 
+/* ── Ruler ticks ── */
 .rulerTick {
   position: absolute;
   top: 0;
@@ -105,10 +137,23 @@
   left: 4px;
   font-size: 10px;
   color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
+/* ── Layer label row ── */
 .layerLabelCell {
   font-size: 12px;
+  cursor: grab;
+  transition: background 0.1s;
+}
+
+.layerLabelCell:hover {
+  background: color-mix(in srgb, var(--color-bg-secondary) 80%, white);
+}
+
+.layerLabelCellDragging {
+  background: color-mix(in srgb, var(--color-selection) 25%, var(--color-bg-secondary));
+  opacity: 0.85;
 }
 
 .trackName,
@@ -117,32 +162,72 @@
   font-size: 12px;
   color: var(--color-text-primary);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+/* ── Layer time cell ── */
 .layerTimeCell {
   background: color-mix(in srgb, #1a2230 75%, black);
 }
 
+/* ── Clip bar ── */
 .layerClipBar {
   position: absolute;
-  top: 5px;
-  height: calc(100% - 10px);
+  top: 4px;
+  height: calc(100% - 8px);
   border-radius: 4px;
   background: linear-gradient(90deg, #2e6cff, #4e85ff);
   border: 1px solid color-mix(in srgb, #9fb5ff 45%, black);
   cursor: grab;
   display: flex;
   justify-content: space-between;
-  overflow: hidden;
+  align-items: stretch;
+  transition: box-shadow 0.1s, border-color 0.1s;
+  min-width: 4px;
 }
 
+.layerClipBar:hover {
+  border-color: color-mix(in srgb, #9fb5ff 75%, white);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-selection) 30%, transparent);
+}
+
+.layerClipBarDragging {
+  cursor: grabbing;
+  box-shadow: 0 0 0 2px var(--color-selection);
+  border-color: var(--color-selection);
+}
+
+/* ── Trim handles ── */
 .layerTrimHandle {
-  width: 6px;
+  width: 12px;
+  min-width: 12px;
   height: 100%;
-  background: color-mix(in srgb, white 25%, transparent);
   cursor: ew-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.1s;
 }
 
+.layerTrimHandle:hover {
+  background: color-mix(in srgb, white 30%, transparent);
+}
+
+.layerTrimHandle::after {
+  content: '';
+  width: 2px;
+  height: 10px;
+  border-radius: 1px;
+  background: color-mix(in srgb, white 50%, transparent);
+}
+
+.layerTrimHandle:hover::after {
+  background: color-mix(in srgb, white 80%, transparent);
+}
+
+/* ── Property label row ── */
 .propertyLabelCell {
   display: grid;
   grid-template-columns: minmax(74px, 1fr) 30px 24px 24px 24px 56px;
@@ -159,30 +244,58 @@
   color: var(--color-text-muted);
   font-size: 11px;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
+/* ── Keyframe diamonds ── */
 .keyDiamond {
   position: absolute;
   top: 50%;
   width: 10px;
   height: 10px;
   background: var(--color-selection);
-  border: 1px solid transparent;
+  border: 1.5px solid transparent;
   padding: 0;
   cursor: pointer;
   appearance: none;
   transform: translate(-50%, -50%) rotate(45deg);
+  transition: border-color 0.08s, box-shadow 0.08s, transform 0.08s;
+  z-index: 1;
 }
 
 .keyDiamond:hover {
   border-color: white;
+  transform: translate(-50%, -50%) rotate(45deg) scale(1.2);
+  z-index: 2;
 }
 
 .keyDiamondSelected {
   border-color: #ffd166;
-  box-shadow: 0 0 0 1px #ffd166;
+  box-shadow: 0 0 0 1.5px #ffd166;
 }
 
+.keyDiamondSelected:hover {
+  border-color: #ffe099;
+  box-shadow: 0 0 0 2px #ffe099;
+}
+
+/* ── Keyframe drag tooltip ── */
+.keyDragTooltip {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transform: translate(-50%, -100%);
+  margin-top: -8px;
+}
+
+/* ── Playhead ── */
 .playhead {
   position: absolute;
   top: 0;
@@ -191,7 +304,7 @@
   background: #ff4d4f;
   transform: translateX(-50%);
   pointer-events: none;
-  z-index: 4;
+  z-index: 5;
 }
 
 .playheadHead {
@@ -203,4 +316,29 @@
   border-radius: 2px;
   background: #ff4d4f;
   transform: translate(-50%, 0) rotate(45deg);
+}
+
+/* ── Snap indicator lines ── */
+.snapLine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #ffd166;
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0.7;
+}
+
+/* ── Layer reorder drop indicator ── */
+.dropIndicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--color-selection);
+  pointer-events: none;
+  z-index: 10;
+  border-radius: 1px;
+  box-shadow: 0 0 4px var(--color-selection);
 }
