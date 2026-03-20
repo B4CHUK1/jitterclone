@@ -94,13 +94,14 @@ export function Canvas() {
   const currentTime = useTimelineStore((s) => s.currentTime);
   const evaluatedDoc = evaluateDocumentAtTime(doc, currentTime);
   const updateTransform = useDocumentStore((s) => s.updateTransform);
-  const updateTransforms = useDocumentStore((s) => s.updateTransforms);
+  const setAnimatableValue = useDocumentStore((s) => s.setAnimatableValue);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const select = useEditorStore((s) => s.select);
   const selectMultiple = useEditorStore((s) => s.selectMultiple);
   const toggleSelect = useEditorStore((s) => s.toggleSelect);
   const deselectAll = useEditorStore((s) => s.deselectAll);
   const activeTool = useEditorStore((s) => s.activeTool);
+  const autoKeyframe = useTimelineStore((s) => s.autoKeyframe);
 
   const zoom = useViewportStore((s) => s.zoom);
   const panX = useViewportStore((s) => s.panX);
@@ -494,7 +495,8 @@ export function Canvas() {
               threshold,
             );
             for (const [id, pos] of updates) {
-              updateTransform(id, { x: pos.x + snap.dx, y: pos.y + snap.dy });
+              setAnimatableValue(id, 'x', pos.x + snap.dx, currentTime, autoKeyframe);
+              setAnimatableValue(id, 'y', pos.y + snap.dy, currentTime, autoKeyframe);
             }
             setSnapGuides(snap.guides);
             tick();
@@ -503,7 +505,8 @@ export function Canvas() {
         }
 
         for (const [id, pos] of updates) {
-          updateTransform(id, pos);
+          setAnimatableValue(id, 'x', pos.x, currentTime, autoKeyframe);
+          setAnimatableValue(id, 'y', pos.y, currentTime, autoKeyframe);
         }
         setSnapGuides([]);
         tick();
@@ -522,7 +525,17 @@ export function Canvas() {
           getCanvasBounds(doc.composition.width, doc.composition.height),
           SNAP_THRESHOLD_SCREEN_PX / zoom,
         );
-        updateTransform(resizeStateRef.current.nodeId, snapped.transform);
+        const resizeTransform = snapped.transform;
+        if (resizeTransform.x !== undefined) {
+          setAnimatableValue(resizeStateRef.current.nodeId, 'x', resizeTransform.x, currentTime, autoKeyframe);
+        }
+        if (resizeTransform.y !== undefined) {
+          setAnimatableValue(resizeStateRef.current.nodeId, 'y', resizeTransform.y, currentTime, autoKeyframe);
+        }
+        updateTransform(resizeStateRef.current.nodeId, {
+          width: resizeTransform.width,
+          height: resizeTransform.height,
+        });
         setSnapGuides(snapped.guides);
         tick();
         return;
@@ -530,7 +543,12 @@ export function Canvas() {
 
       if (phaseRef.current === 'rotating' && rotateStateRef.current) {
         const updates = updateRotate(rotateStateRef.current, world, e.shiftKey);
-        updateTransforms(updates.updates);
+        for (const [id, transform] of updates.updates) {
+          if (transform.rotation !== undefined) {
+            setAnimatableValue(id, 'rotation', transform.rotation, currentTime, autoKeyframe);
+          }
+          updateTransform(id, { x: transform.x, y: transform.y });
+        }
         setRotateTooltip({
           client: { x: e.clientX, y: e.clientY },
           angle: updates.primaryRotation,
@@ -574,13 +592,15 @@ export function Canvas() {
       toggleSelect,
       doc.nodes,
       updateTransform,
+      setAnimatableValue,
       doc.composition.width,
       doc.composition.height,
       zoom,
       getScene,
       selectMultiple,
       tick,
-      updateTransforms,
+      currentTime,
+      autoKeyframe,
     ],
   );
 

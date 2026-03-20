@@ -5,6 +5,7 @@
 
 import type {
   AnimatableProperty,
+  AnimatedProperty,
   Document,
   Keyframe,
   NodeStyle,
@@ -177,7 +178,8 @@ export function setNodeKeyframe(
 ): Document {
   const node = doc.nodes[nodeId];
   if (!node) return doc;
-  const existing = node.animation.tracks[property] ?? [];
+  const propertyState = node.animation.properties[property];
+  const existing = propertyState.keyframes;
   const filtered = existing.filter((k) => Math.abs(k.time - keyframe.time) > 1e-6);
   const nextTrack = [...filtered, keyframe].sort((a, b) => a.time - b.time);
 
@@ -188,9 +190,13 @@ export function setNodeKeyframe(
       [nodeId]: {
         ...node,
         animation: {
-          tracks: {
-            ...node.animation.tracks,
-            [property]: nextTrack,
+          properties: {
+            ...node.animation.properties,
+            [property]: {
+              ...propertyState,
+              animated: true,
+              keyframes: nextTrack,
+            },
           },
         },
       },
@@ -206,7 +212,8 @@ export function removeNodeKeyframe(
 ): Document {
   const node = doc.nodes[nodeId];
   if (!node) return doc;
-  const existing = node.animation.tracks[property] ?? [];
+  const propertyState = node.animation.properties[property];
+  const existing = propertyState.keyframes;
   const nextTrack = existing.filter((k) => Math.abs(k.time - time) > 1e-6);
 
   return {
@@ -216,9 +223,41 @@ export function removeNodeKeyframe(
       [nodeId]: {
         ...node,
         animation: {
-          tracks: {
-            ...node.animation.tracks,
-            [property]: nextTrack,
+          properties: {
+            ...node.animation.properties,
+            [property]: {
+              ...propertyState,
+              keyframes: nextTrack,
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+export function setNodePropertyAnimation(
+  doc: Document,
+  nodeId: string,
+  property: AnimatableProperty,
+  updates: Partial<AnimatedProperty>,
+): Document {
+  const node = doc.nodes[nodeId];
+  if (!node) return doc;
+  const propertyState = node.animation.properties[property];
+  return {
+    ...doc,
+    nodes: {
+      ...doc.nodes,
+      [nodeId]: {
+        ...node,
+        animation: {
+          properties: {
+            ...node.animation.properties,
+            [property]: {
+              ...propertyState,
+              ...updates,
+            },
           },
         },
       },

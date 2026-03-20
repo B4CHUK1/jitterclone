@@ -11,7 +11,7 @@ import {
 import { getRenderNodeBounds } from '@/engine/interaction/snapEngine';
 import type { Document } from '@/document/types';
 import type { AnimatableProperty } from '@/document/types';
-import { hasKeyframeAtTime } from '@/engine/animation';
+import { evaluateNodeAtTime, hasKeyframeAtTime, isPropertyAnimated } from '@/engine/animation';
 import { useEditorStore, useDocumentStore, useTimelineStore } from '@/state';
 import { NumericInput } from '@/ui/components/NumericInput';
 import styles from './PropertiesPanel.module.css';
@@ -23,9 +23,11 @@ export function PropertiesPanel() {
   const updateTransforms = useDocumentStore((s) => s.updateTransforms);
   const updateStyle = useDocumentStore((s) => s.updateStyle);
   const updateComposition = useDocumentStore((s) => s.updateComposition);
-  const setKeyframe = useDocumentStore((s) => s.setKeyframe);
-  const removeKeyframe = useDocumentStore((s) => s.removeKeyframe);
+  const setAnimatableValue = useDocumentStore((s) => s.setAnimatableValue);
+  const togglePropertyStopwatch = useDocumentStore((s) => s.togglePropertyStopwatch);
+  const addKeyframeAtCurrentTime = useDocumentStore((s) => s.addKeyframeAtCurrentTime);
   const currentTime = useTimelineStore((s) => s.currentTime);
+  const autoKeyframe = useTimelineStore((s) => s.autoKeyframe);
 
   if (selectedIds.size === 0) {
     return (
@@ -118,76 +120,20 @@ export function PropertiesPanel() {
         <div className={styles.section}>
           <div className={styles.sectionTitle}>Align</div>
           <div className={styles.grid}>
-            <button
-              type="button"
-              className={styles.actionButton}
-              disabled={!canRunAlign}
-              onClick={() => runAlign('left')}
-            >
-              Left
-            </button>
-            <button
-              type="button"
-              className={styles.actionButton}
-              disabled={!canRunAlign}
-              onClick={() => runAlign('h-center')}
-            >
-              H-Center
-            </button>
-            <button
-              type="button"
-              className={styles.actionButton}
-              disabled={!canRunAlign}
-              onClick={() => runAlign('right')}
-            >
-              Right
-            </button>
-            <button
-              type="button"
-              className={styles.actionButton}
-              disabled={!canRunAlign}
-              onClick={() => runAlign('top')}
-            >
-              Top
-            </button>
-            <button
-              type="button"
-              className={styles.actionButton}
-              disabled={!canRunAlign}
-              onClick={() => runAlign('v-center')}
-            >
-              V-Center
-            </button>
-            <button
-              type="button"
-              className={styles.actionButton}
-              disabled={!canRunAlign}
-              onClick={() => runAlign('bottom')}
-            >
-              Bottom
-            </button>
+            <button type="button" className={styles.actionButton} disabled={!canRunAlign} onClick={() => runAlign('left')}>Left</button>
+            <button type="button" className={styles.actionButton} disabled={!canRunAlign} onClick={() => runAlign('h-center')}>H-Center</button>
+            <button type="button" className={styles.actionButton} disabled={!canRunAlign} onClick={() => runAlign('right')}>Right</button>
+            <button type="button" className={styles.actionButton} disabled={!canRunAlign} onClick={() => runAlign('top')}>Top</button>
+            <button type="button" className={styles.actionButton} disabled={!canRunAlign} onClick={() => runAlign('v-center')}>V-Center</button>
+            <button type="button" className={styles.actionButton} disabled={!canRunAlign} onClick={() => runAlign('bottom')}>Bottom</button>
           </div>
         </div>
 
         <div className={styles.section}>
           <div className={styles.sectionTitle}>Distribute</div>
           <div className={styles.row}>
-            <button
-              type="button"
-              className={styles.actionButton}
-              disabled={!canRunHDistribute}
-              onClick={() => runDistribute('h-spacing')}
-            >
-              Horizontal spacing
-            </button>
-            <button
-              type="button"
-              className={styles.actionButton}
-              disabled={!canRunVDistribute}
-              onClick={() => runDistribute('v-spacing')}
-            >
-              Vertical spacing
-            </button>
+            <button type="button" className={styles.actionButton} disabled={!canRunHDistribute} onClick={() => runDistribute('h-spacing')}>Horizontal spacing</button>
+            <button type="button" className={styles.actionButton} disabled={!canRunVDistribute} onClick={() => runDistribute('v-spacing')}>Vertical spacing</button>
           </div>
         </div>
       </div>
@@ -197,120 +143,60 @@ export function PropertiesPanel() {
   const nodeId = [...selectedIds][0]!;
   const node = document.nodes[nodeId];
   if (!node) {
-    return (
-      <div className={styles.panel}>
-        <div className={styles.empty}>No selection</div>
-      </div>
-    );
+    return <div className={styles.panel}><div className={styles.empty}>No selection</div></div>;
   }
 
-  const t = node.transform;
-  const s = node.style;
+  const evaluatedNode = evaluateNodeAtTime(node, currentTime);
+  const t = evaluatedNode.transform;
+  const s = evaluatedNode.style;
 
-  const toggleKey = (property: AnimatableProperty, value: number) => {
-    if (hasKeyframeAtTime(node, property, currentTime)) {
-      removeKeyframe(nodeId, property, currentTime);
-      return;
-    }
-    setKeyframe(nodeId, property, currentTime, value);
+  const setProperty = (property: AnimatableProperty, value: number) => {
+    setAnimatableValue(nodeId, property, value, currentTime, autoKeyframe);
   };
+
+  const stopwatch = (property: AnimatableProperty) => (
+    <button
+      className={styles.actionButton}
+      type="button"
+      onClick={() => togglePropertyStopwatch(nodeId, property, currentTime)}
+      title={isPropertyAnimated(node, property) ? 'Disable animation' : 'Enable animation'}
+    >
+      {isPropertyAnimated(node, property) ? '⏱ On' : '⏱ Off'}
+    </button>
+  );
+
+  const keyButton = (property: AnimatableProperty) => (
+    <button className={styles.actionButton} type="button" onClick={() => addKeyframeAtCurrentTime(nodeId, property, currentTime)}>
+      {hasKeyframeAtTime(node, property, currentTime) ? '● Key' : '+ Key'}
+    </button>
+  );
 
   return (
     <div className={styles.panel}>
-      {/* Transform */}
       <div className={styles.section}>
         <div className={styles.sectionTitle}>Transform</div>
         <div className={styles.row}>
-          <div className={styles.field}>
-            <span className={styles.fieldLabel}>X</span>
-            <NumericInput
-              className={styles.fieldInput}
-              label="X position"
-              value={t.x}
-              onChange={(v) => updateTransform(nodeId, { x: v })}
-            />
-            <button className={styles.actionButton} type="button" onClick={() => toggleKey('x', t.x)}>K</button>
-          </div>
-          <div className={styles.field}>
-            <span className={styles.fieldLabel}>Y</span>
-            <NumericInput
-              className={styles.fieldInput}
-              label="Y position"
-              value={t.y}
-              onChange={(v) => updateTransform(nodeId, { y: v })}
-            />
-            <button className={styles.actionButton} type="button" onClick={() => toggleKey('y', t.y)}>K</button>
-          </div>
+          <div className={styles.field}><span className={styles.fieldLabel}>X</span><NumericInput className={styles.fieldInput} label="X position" value={t.x} onChange={(v) => setProperty('x', v)} />{stopwatch('x')}{keyButton('x')}</div>
+          <div className={styles.field}><span className={styles.fieldLabel}>Y</span><NumericInput className={styles.fieldInput} label="Y position" value={t.y} onChange={(v) => setProperty('y', v)} />{stopwatch('y')}{keyButton('y')}</div>
         </div>
         <div className={styles.row}>
-          <div className={styles.field}>
-            <span className={styles.fieldLabel}>W</span>
-            <NumericInput
-              className={styles.fieldInput}
-              label="Width"
-              value={t.width}
-              onChange={(v) => updateTransform(nodeId, { width: v })}
-              min={1}
-            />
-          </div>
-          <div className={styles.field}>
-            <span className={styles.fieldLabel}>H</span>
-            <NumericInput
-              className={styles.fieldInput}
-              label="Height"
-              value={t.height}
-              onChange={(v) => updateTransform(nodeId, { height: v })}
-              min={1}
-            />
-          </div>
+          <div className={styles.field}><span className={styles.fieldLabel}>W</span><NumericInput className={styles.fieldInput} label="Width" value={t.width} onChange={(v) => updateTransform(nodeId, { width: v })} min={1} /></div>
+          <div className={styles.field}><span className={styles.fieldLabel}>H</span><NumericInput className={styles.fieldInput} label="Height" value={t.height} onChange={(v) => updateTransform(nodeId, { height: v })} min={1} /></div>
         </div>
         <div className={styles.row}>
-          <div className={styles.field}>
-            <span className={styles.fieldLabel}>Rotation</span>
-            <NumericInput
-              className={styles.fieldInput}
-              label="Rotation"
-              value={t.rotation}
-              onChange={(v) => updateTransform(nodeId, { rotation: v })}
-              precision={1}
-            />
-            <button className={styles.actionButton} type="button" onClick={() => toggleKey('rotation', t.rotation)}>K</button>
-          </div>
+          <div className={styles.field}><span className={styles.fieldLabel}>Rotation</span><NumericInput className={styles.fieldInput} label="Rotation" value={t.rotation} onChange={(v) => setProperty('rotation', v)} precision={1} />{stopwatch('rotation')}{keyButton('rotation')}</div>
         </div>
         <div className={styles.row}>
-          <div className={styles.field}>
-            <span className={styles.fieldLabel}>Scale X</span>
-            <NumericInput className={styles.fieldInput} label="Scale X" value={t.scaleX} onChange={(v) => updateTransform(nodeId, { scaleX: v })} precision={3} />
-            <button className={styles.actionButton} type="button" onClick={() => toggleKey('scaleX', t.scaleX)}>K</button>
-          </div>
-          <div className={styles.field}>
-            <span className={styles.fieldLabel}>Scale Y</span>
-            <NumericInput className={styles.fieldInput} label="Scale Y" value={t.scaleY} onChange={(v) => updateTransform(nodeId, { scaleY: v })} precision={3} />
-            <button className={styles.actionButton} type="button" onClick={() => toggleKey('scaleY', t.scaleY)}>K</button>
-          </div>
+          <div className={styles.field}><span className={styles.fieldLabel}>Scale X</span><NumericInput className={styles.fieldInput} label="Scale X" value={t.scaleX} onChange={(v) => setProperty('scaleX', v)} precision={3} />{stopwatch('scaleX')}{keyButton('scaleX')}</div>
+          <div className={styles.field}><span className={styles.fieldLabel}>Scale Y</span><NumericInput className={styles.fieldInput} label="Scale Y" value={t.scaleY} onChange={(v) => setProperty('scaleY', v)} precision={3} />{stopwatch('scaleY')}{keyButton('scaleY')}</div>
         </div>
       </div>
 
-      {/* Style */}
       <div className={styles.section}>
         <div className={styles.sectionTitle}>Fill</div>
         <div className={styles.colorRow}>
-          <input
-            className={styles.colorSwatch}
-            type="color"
-            value={s.fill.color}
-            onChange={(e) =>
-              updateStyle(nodeId, { fill: { ...s.fill, color: e.target.value } })
-            }
-          />
-          <input
-            className={styles.colorInput}
-            type="text"
-            value={s.fill.color}
-            onChange={(e) =>
-              updateStyle(nodeId, { fill: { ...s.fill, color: e.target.value } })
-            }
-          />
+          <input className={styles.colorSwatch} type="color" value={s.fill.color} onChange={(e) => updateStyle(nodeId, { fill: { ...s.fill, color: e.target.value } })} />
+          <input className={styles.colorInput} type="text" value={s.fill.color} onChange={(e) => updateStyle(nodeId, { fill: { ...s.fill, color: e.target.value } })} />
         </div>
       </div>
 
@@ -318,15 +204,9 @@ export function PropertiesPanel() {
         <div className={styles.sectionTitle}>Opacity</div>
         <div className={styles.row}>
           <div className={styles.field}>
-            <NumericInput
-              className={styles.fieldInput}
-              label="Opacity"
-              value={s.opacity * 100}
-              onChange={(v) => updateStyle(nodeId, { opacity: v / 100 })}
-              min={0}
-              max={100}
-            />
-            <button className={styles.actionButton} type="button" onClick={() => toggleKey('opacity', s.opacity)}>K</button>
+            <NumericInput className={styles.fieldInput} label="Opacity" value={s.opacity * 100} onChange={(v) => setProperty('opacity', v / 100)} min={0} max={100} />
+            {stopwatch('opacity')}
+            {keyButton('opacity')}
           </div>
         </div>
       </div>
