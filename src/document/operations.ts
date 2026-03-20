@@ -39,6 +39,8 @@ export function addNode(
     visible: overrides.visible ?? true,
     locked: overrides.locked ?? false,
     animation: overrides.animation ?? defaultNodeAnimation(),
+    polygon: overrides.polygon ?? (type === 'polygon' ? { sides: 6 } : undefined),
+    star: overrides.star ?? (type === 'star' ? { points: 5, innerRadius: 0.4 } : undefined),
     startTime: overrides.startTime ?? 0,
     endTime: overrides.endTime ?? doc.composition.duration,
   };
