@@ -11,6 +11,7 @@ export function App() {
   const deselectAll = useEditorStore((s) => s.deselectAll);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const removeNode = useDocumentStore((s) => s.removeNode);
+  const removeKeyframe = useDocumentStore((s) => s.removeKeyframe);
   const undo = useDocumentStore((s) => s.undo);
   const redo = useDocumentStore((s) => s.redo);
   const composition = useDocumentStore((s) => s.document.composition);
@@ -63,22 +64,42 @@ export function App() {
         case 'h':
           setTool('hand');
           break;
+        case 'd':
+          setTool('pen');
+          break;
         case 'escape':
-          deselectAll();
+          // Clear keyframe selection first, then object selection
+          if (useTimelineStore.getState().selectedKeyframes.length > 0) {
+            useTimelineStore.getState().setSelectedKeyframes([]);
+          } else {
+            deselectAll();
+          }
           break;
         case 'delete':
-        case 'backspace':
-          for (const id of selectedIds) {
-            removeNode(id);
+        case 'backspace': {
+          // If keyframes are selected in timeline, delete those (not the objects)
+          const timelineState = useTimelineStore.getState();
+          if (timelineState.selectedKeyframes.length > 0) {
+            e.preventDefault();
+            for (const sel of timelineState.selectedKeyframes) {
+              removeKeyframe(sel.nodeId, sel.property, sel.time);
+            }
+            timelineState.setSelectedKeyframes([]);
+          } else {
+            // No keyframes selected — delete selected objects
+            for (const id of selectedIds) {
+              removeNode(id);
+            }
+            deselectAll();
           }
-          deselectAll();
           break;
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setTool, deselectAll, selectedIds, removeNode, undo, redo]);
+  }, [setTool, deselectAll, selectedIds, removeNode, removeKeyframe, undo, redo]);
 
   useEffect(() => {
     if (!isPlaying) return;

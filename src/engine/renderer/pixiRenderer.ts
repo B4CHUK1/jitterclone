@@ -3,9 +3,9 @@
  * Completely decoupled from React.
  */
 
-import { Application, Container, Graphics } from 'pixi.js';
+import { Application, Container, Graphics, BlurFilter } from 'pixi.js';
 import type { RenderNode } from '@/engine/scene';
-import type { BlendMode, SceneNode } from '@/document/types';
+import type { BlendMode, Effect, SceneNode } from '@/document/types';
 
 const BLEND_MODE_MAP: Record<BlendMode, string> = {
   'normal': 'normal',
@@ -29,11 +29,17 @@ export interface RendererOptions {
   backgroundColor: number;
 }
 
+interface NodeDisplayObjects {
+  container: Container;
+  shadow: Graphics | null;
+  main: Graphics;
+}
+
 export class PixiRenderer {
   private app: Application;
   private worldContainer: Container;
   private docBackground: Graphics;
-  private nodeGraphics: Map<string, Graphics> = new Map();
+  private nodeDisplays: Map<string, NodeDisplayObjects> = new Map();
   private _ready = false;
 
   constructor() {
@@ -109,57 +115,107 @@ export class PixiRenderer {
     }
     collect(sceneRoots);
 
-    // Update or create graphics for each node
-    for (const rn of renderList) {
+    // Update or create display objects for each node
+    for (let i = 0; i < renderList.length; i++) {
+      const rn = renderList[i]!;
       activeIds.add(rn.node.id);
-      let gfx = this.nodeGraphics.get(rn.node.id);
+      let display = this.nodeDisplays.get(rn.node.id);
 
-      if (!gfx) {
-        gfx = new Graphics();
-        this.nodeGraphics.set(rn.node.id, gfx);
-        this.worldContainer.addChild(gfx);
+      if (!display) {
+        const container = new Container();
+        const main = new Graphics();
+        container.addChild(main);
+        display = { container, shadow: null, main };
+        this.nodeDisplays.set(rn.node.id, display);
+        this.worldContainer.addChild(container);
       }
 
-      this.drawNode(gfx, rn);
+      this.drawNode(display, rn);
+      // Ensure correct z-order
+      this.worldContainer.setChildIndex(display.container, i + 1); // +1 for docBackground
     }
 
-    // Remove stale graphics
-    for (const [id, gfx] of this.nodeGraphics) {
+    // Remove stale display objects
+    for (const [id, display] of this.nodeDisplays) {
       if (!activeIds.has(id)) {
-        this.worldContainer.removeChild(gfx);
-        gfx.destroy();
-        this.nodeGraphics.delete(id);
+        this.worldContainer.removeChild(display.container);
+        display.container.destroy({ children: true });
+        this.nodeDisplays.delete(id);
       }
     }
   }
 
-  private drawNode(gfx: Graphics, rn: RenderNode): void {
+  private drawNode(display: NodeDisplayObjects, rn: RenderNode): void {
     const { node, worldMatrix } = rn;
+    const { container, main } = display;
 
-    gfx.clear();
+    main.clear();
 
     if (!node.visible) {
-      gfx.visible = false;
+      container.visible = false;
       return;
     }
-    gfx.visible = true;
+    container.visible = true;
 
-    // Apply world matrix directly via individual properties
-    gfx.position.set(worldMatrix.tx, worldMatrix.ty);
-    gfx.rotation = Math.atan2(worldMatrix.b, worldMatrix.a);
+    // Apply world matrix to the container
+    container.position.set(worldMatrix.tx, worldMatrix.ty);
+    container.rotation = Math.atan2(worldMatrix.b, worldMatrix.a);
     const scaleX = Math.sqrt(worldMatrix.a * worldMatrix.a + worldMatrix.b * worldMatrix.b);
     const scaleY = Math.sqrt(worldMatrix.c * worldMatrix.c + worldMatrix.d * worldMatrix.d);
     const sign = worldMatrix.a * worldMatrix.d - worldMatrix.b * worldMatrix.c < 0 ? -1 : 1;
-    gfx.scale.set(scaleX, sign * scaleY);
+    container.scale.set(scaleX, sign * scaleY);
 
-    gfx.alpha = node.style?.opacity ?? 1;
+    container.alpha = node.style?.opacity ?? 1;
 
-    // Apply blend mode (PixiJS 8 accepts string values directly)
+    // Apply blend mode
     const blendMode = node.style?.blendMode ?? 'normal';
     const pixiBlendMode = BLEND_MODE_MAP[blendMode] ?? 'normal';
-    gfx.blendMode = pixiBlendMode as never;
+    container.blendMode = pixiBlendMode as never;
 
-    this.drawShape(gfx, node);
+    // Draw the main shape
+    this.drawShape(main, node);
+
+    // Handle effects
+    this.applyEffects(display, node);
+  }
+
+  private applyEffects(display: NodeDisplayObjects, node: SceneNode): void {
+    const effects = node.style?.effects ?? [];
+
+    // Handle drop shadow
+    const shadowEffect = effects.find((e): e is Extract<Effect, { type: 'drop-shadow' }> => e.type === 'drop-shadow');
+    if (shadowEffect) {
+      if (!display.shadow) {
+        display.shadow = new Graphics();
+        // Insert shadow before main shape
+        display.container.addChildAt(display.shadow, 0);
+      }
+      display.shadow.clear();
+      display.shadow.visible = true;
+      // Draw the same shape for the shadow
+      this.drawShapePath(display.shadow, node);
+      const shadowColor = shadowEffect.color ?? '#000000';
+      display.shadow.fill({ color: shadowColor, alpha: shadowEffect.opacity ?? 0.5 });
+      display.shadow.position.set(shadowEffect.offsetX, shadowEffect.offsetY);
+      // Apply blur filter to shadow
+      const blurAmount = shadowEffect.blur ?? 0;
+      if (blurAmount > 0) {
+        display.shadow.filters = [new BlurFilter({ strength: blurAmount, quality: 4 })];
+      } else {
+        display.shadow.filters = [];
+      }
+    } else if (display.shadow) {
+      display.shadow.visible = false;
+      display.shadow.filters = [];
+    }
+
+    // Handle gaussian blur on main shape
+    const blurEffect = effects.find((e): e is Extract<Effect, { type: 'blur' }> => e.type === 'blur');
+    if (blurEffect && blurEffect.radius > 0) {
+      display.main.filters = [new BlurFilter({ strength: blurEffect.radius, quality: 4 })];
+    } else {
+      display.main.filters = [];
+    }
   }
 
   private drawShapePath(gfx: Graphics, node: SceneNode): void {
@@ -179,6 +235,17 @@ export class PixiRenderer {
         const points = node.star?.points ?? 5;
         const innerRatio = node.star?.innerRadius ?? 0.4;
         this.drawStar(gfx, width / 2, height / 2, Math.min(width, height) / 2, points, innerRatio);
+        break;
+      }
+      case 'path': {
+        const pathData = node.pathData;
+        if (pathData && pathData.length > 1) {
+          // Path points are stored in normalized [0,1] space relative to width/height
+          gfx.moveTo(pathData[0]!.x * width, pathData[0]!.y * height);
+          for (let i = 1; i < pathData.length; i++) {
+            gfx.lineTo(pathData[i]!.x * width, pathData[i]!.y * height);
+          }
+        }
         break;
       }
       case 'line':
@@ -236,21 +303,21 @@ export class PixiRenderer {
     if (stroke && stroke.opacity > 0 && stroke.width > 0) {
       this.drawShapePath(gfx, node);
       gfx.stroke({ color: stroke.color, alpha: stroke.opacity, width: stroke.width });
-    } else if (node.type === 'line') {
-      // Lines always need a stroke
+    } else if (node.type === 'line' || node.type === 'path') {
+      // Lines and paths always need a stroke
       this.drawShapePath(gfx, node);
       const color = stroke?.color ?? fill.color ?? '#ffffff';
-      gfx.stroke({ color, alpha: stroke?.opacity ?? fill.opacity ?? 1, width: stroke?.width ?? 2 });
+      gfx.stroke({ color, alpha: stroke?.opacity ?? fill.opacity ?? 1, width: stroke?.width ?? 3 });
     }
   }
 
   getGraphicsForNode(nodeId: string): Graphics | undefined {
-    return this.nodeGraphics.get(nodeId);
+    return this.nodeDisplays.get(nodeId)?.main;
   }
 
   destroy(): void {
-    this.nodeGraphics.forEach((gfx) => gfx.destroy());
-    this.nodeGraphics.clear();
+    this.nodeDisplays.forEach((display) => display.container.destroy({ children: true }));
+    this.nodeDisplays.clear();
     this.app.destroy(true);
     this._ready = false;
   }

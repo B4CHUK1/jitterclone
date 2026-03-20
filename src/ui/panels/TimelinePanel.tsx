@@ -2,6 +2,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent, WheelEvent } from 'react';
 import type { AnimatableProperty, EasingPreset, SceneNode } from '@/document/types';
 import {
+  SkipBack,
+  ChevronLeft,
+  Play,
+  Pause,
+  Square as StopIcon,
+  ChevronRight,
+  SkipForward,
+  KeyRound,
+  ChevronDown,
+  ChevronRight as ChevronRightIcon,
+  Timer,
+  Diamond,
+  Plus,
+} from 'lucide-react';
+import {
   evaluateNodeAtTime,
   hasKeyframeAtTime,
   isPropertyAnimated,
@@ -241,14 +256,8 @@ export function TimelinePanel() {
           setKeyframe(key.nodeId, key.property, localTime, key.value);
         }
       }
-      // Delete selected keyframes
-      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedKeyframes.length > 0) {
-        event.preventDefault();
-        for (const sel of selectedKeyframes) {
-          removeKeyframe(sel.nodeId, sel.property, sel.time);
-        }
-        setSelectedKeyframes([]);
-      }
+      // Note: Delete/Backspace is handled globally in App.tsx
+      // to avoid conflict between keyframe deletion and object deletion
       // Work area shortcuts: B = set start, N = set end
       if (event.key.toLowerCase() === 'b' && !event.ctrlKey && !event.metaKey) {
         if (!(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) {
@@ -356,6 +365,7 @@ export function TimelinePanel() {
         if (!dragging && dy > 4) {
           dragging = true;
           el.setPointerCapture(event.pointerId);
+          window.document.body.style.userSelect = 'none';
           autoScrollId = requestAnimationFrame(autoScroll);
         }
         if (dragging) {
@@ -368,6 +378,7 @@ export function TimelinePanel() {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         cancelAnimationFrame(autoScrollId);
+        window.document.body.style.userSelect = '';
         if (dragging) {
           const currentIndex = tracks.findIndex((t) => t.id === nodeId);
           if (currentDropIndex !== currentIndex && currentDropIndex !== currentIndex + 1) {
@@ -403,26 +414,31 @@ export function TimelinePanel() {
     <div className={styles.timeline}>
       {/* ── Transport bar ── */}
       <div className={styles.header}>
-        <button type="button" className={styles.playButton} onClick={jumpToStart}>
-          ⏮ Start
+        <button type="button" className={styles.transportButton} onClick={jumpToStart} title="Jump to start">
+          <SkipBack size={14} />
         </button>
-        <button type="button" className={styles.playButton} onClick={() => stepFrame(-1)}>
-          ◀ Frame
+        <button type="button" className={styles.transportButton} onClick={() => stepFrame(-1)} title="Previous frame">
+          <ChevronLeft size={14} />
         </button>
-        <button type="button" className={styles.playButton} onClick={handlePlayPause}>
-          {isPlaying ? '❚❚ Pause' : '▶ Play'}
+        <button type="button" className={`${styles.transportButton} ${styles.transportButtonPlay}`} onClick={handlePlayPause} title={isPlaying ? 'Pause' : 'Play'}>
+          {isPlaying ? <Pause size={14} /> : <Play size={14} />}
         </button>
-        <button type="button" className={styles.playButton} onClick={handleStop}>
-          ⏹ Stop
+        <button type="button" className={styles.transportButton} onClick={handleStop} title="Stop">
+          <StopIcon size={14} />
         </button>
-        <button type="button" className={styles.playButton} onClick={() => stepFrame(1)}>
-          Frame ▶
+        <button type="button" className={styles.transportButton} onClick={() => stepFrame(1)} title="Next frame">
+          <ChevronRight size={14} />
         </button>
-        <button type="button" className={styles.playButton} onClick={jumpToEnd}>
-          End ⏭
+        <button type="button" className={styles.transportButton} onClick={jumpToEnd} title="Jump to end">
+          <SkipForward size={14} />
         </button>
-        <button type="button" className={styles.playButton} onClick={toggleAutoKeyframe}>
-          {autoKeyframe ? 'Auto-Key ON' : 'Auto-Key OFF'}
+        <button
+          type="button"
+          className={`${styles.transportButton} ${autoKeyframe ? styles.transportButtonActive : ''}`}
+          onClick={toggleAutoKeyframe}
+          title={autoKeyframe ? 'Auto-keyframe ON' : 'Auto-keyframe OFF'}
+        >
+          <KeyRound size={14} />
         </button>
         {selectedKeyframes.length > 0 && (
           <select
@@ -574,7 +590,7 @@ export function TimelinePanel() {
                         setExpandedLayers((s) => ({ ...s, [row.node.id]: !expanded }));
                       }}
                     >
-                      {expanded ? '▾' : '▸'}
+                      {expanded ? <ChevronDown size={12} /> : <ChevronRightIcon size={12} />}
                     </button>
                     <span className={styles.trackName}>
                       {selectedIds.has(row.node.id) ? '● ' : ''}
@@ -866,17 +882,17 @@ function PropertyRow({
     <div className={styles.row} style={{ top: `${top}px`, height: `${height}px` }}>
       <div className={`${styles.labelCell} ${styles.propertyLabelCell}`}>
         <div className={styles.propertyLabel}>{label}</div>
-        <button type="button" className={styles.stopwatchButton} onClick={onToggleStopwatch}>
-          {isAnimated ? '⏱' : '◌'}
+        <button type="button" className={`${styles.stopwatchButton} ${isAnimated ? styles.stopwatchActive : ''}`} onClick={onToggleStopwatch} title={isAnimated ? 'Disable animation' : 'Enable animation'}>
+          <Timer size={12} />
         </button>
-        <button type="button" className={styles.miniButton} onClick={() => navigateKeyframe('prev')}>
-          ◀
+        <button type="button" className={styles.miniButton} onClick={() => navigateKeyframe('prev')} title="Previous keyframe">
+          <ChevronLeft size={12} />
         </button>
-        <button type="button" className={styles.miniButton} onClick={onAddKey}>
-          {hasKeyframeAtTime(node, property, localTime) ? '◆' : '+'}
+        <button type="button" className={styles.miniButton} onClick={onAddKey} title={hasKeyframeAtTime(node, property, localTime) ? 'Keyframe exists' : 'Add keyframe'}>
+          {hasKeyframeAtTime(node, property, localTime) ? <Diamond size={10} fill="currentColor" /> : <Plus size={12} />}
         </button>
-        <button type="button" className={styles.miniButton} onClick={() => navigateKeyframe('next')}>
-          ▶
+        <button type="button" className={styles.miniButton} onClick={() => navigateKeyframe('next')} title="Next keyframe">
+          <ChevronRight size={12} />
         </button>
         <div className={styles.valueReadout}>{display}</div>
       </div>
@@ -930,6 +946,8 @@ function PropertyRow({
                 }
                 const initialGlobalTime = localToGlobalTime(key.time, node);
 
+                window.document.body.style.userSelect = 'none';
+
                 const move = (e: globalThis.PointerEvent) => {
                   e.preventDefault();
                   const deltaPx = e.clientX - baseX;
@@ -956,6 +974,7 @@ function PropertyRow({
                 const up = () => {
                   window.removeEventListener('pointermove', move);
                   window.removeEventListener('pointerup', up);
+                  window.document.body.style.userSelect = '';
                   onSnapActive(null);
                   setDragTooltip(null);
                   // Update selected keyframes to their new times

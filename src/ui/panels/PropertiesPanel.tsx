@@ -1,3 +1,7 @@
+import {
+  Timer,
+  Diamond,
+} from 'lucide-react';
 import { buildSceneGraph, findRenderNode } from '@/engine/scene';
 import {
   alignNodes,
@@ -35,6 +39,7 @@ export function PropertiesPanel() {
   const currentTime = useTimelineStore((s) => s.currentTime);
   const autoKeyframe = useTimelineStore((s) => s.autoKeyframe);
   const addEffect = useDocumentStore((s) => s.addEffect);
+  const updateEffect = useDocumentStore((s) => s.updateEffect);
   const removeEffect = useDocumentStore((s) => s.removeEffect);
   const applyPreset = useDocumentStore((s) => s.applyPreset);
 
@@ -165,18 +170,23 @@ export function PropertiesPanel() {
 
   const stopwatch = (property: AnimatableProperty) => (
     <button
-      className={styles.actionButton}
+      className={`${styles.iconButton} ${isPropertyAnimated(node, property) ? styles.iconButtonActive : ''}`}
       type="button"
       onClick={() => togglePropertyStopwatch(nodeId, property, currentTime)}
       title={isPropertyAnimated(node, property) ? 'Disable animation' : 'Enable animation'}
     >
-      {isPropertyAnimated(node, property) ? '⏱ On' : '⏱ Off'}
+      <Timer size={14} />
     </button>
   );
 
   const keyButton = (property: AnimatableProperty) => (
-    <button className={styles.actionButton} type="button" onClick={() => addKeyframeAtCurrentTime(nodeId, property, currentTime)}>
-      {hasKeyframeAtTime(node, property, globalToLocalTime(currentTime, node)) ? '● Key' : '+ Key'}
+    <button
+      className={`${styles.iconButton} ${hasKeyframeAtTime(node, property, globalToLocalTime(currentTime, node)) ? styles.iconButtonActive : ''}`}
+      type="button"
+      onClick={() => addKeyframeAtCurrentTime(nodeId, property, currentTime)}
+      title={hasKeyframeAtTime(node, property, globalToLocalTime(currentTime, node)) ? 'Keyframe exists' : 'Add keyframe'}
+    >
+      <Diamond size={12} />
     </button>
   );
 
@@ -282,9 +292,51 @@ export function PropertiesPanel() {
       <div className={styles.section}>
         <div className={styles.sectionTitle}>Effects</div>
         {node.style.effects.map((effect, idx) => (
-          <div key={idx} className={styles.row}>
-            <span className={styles.fieldLabel}>{effect.type}</span>
-            <button className={styles.actionButton} type="button" onClick={() => removeEffect(nodeId, idx)}>Remove</button>
+          <div key={idx} className={styles.effectBlock}>
+            <div className={styles.row}>
+              <span className={styles.fieldLabel} style={{ flex: 1, fontWeight: 600 }}>
+                {effect.type === 'drop-shadow' ? 'Drop Shadow' : effect.type === 'blur' ? 'Blur' : effect.type}
+              </span>
+              <button className={styles.actionButton} type="button" style={{ flex: 0 }} onClick={() => removeEffect(nodeId, idx)}>
+                Remove
+              </button>
+            </div>
+            {effect.type === 'drop-shadow' && (
+              <>
+                <div className={styles.row}>
+                  <div className={styles.field}>
+                    <span className={styles.fieldLabel}>Offset X</span>
+                    <NumericInput className={styles.fieldInput} label="Shadow X" value={effect.offsetX} onChange={(v) => updateEffect(nodeId, idx, { ...effect, offsetX: v })} />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.fieldLabel}>Offset Y</span>
+                    <NumericInput className={styles.fieldInput} label="Shadow Y" value={effect.offsetY} onChange={(v) => updateEffect(nodeId, idx, { ...effect, offsetY: v })} />
+                  </div>
+                </div>
+                <div className={styles.row}>
+                  <div className={styles.field}>
+                    <span className={styles.fieldLabel}>Blur</span>
+                    <NumericInput className={styles.fieldInput} label="Shadow blur" value={effect.blur} min={0} onChange={(v) => updateEffect(nodeId, idx, { ...effect, blur: v })} />
+                  </div>
+                  <div className={styles.field}>
+                    <span className={styles.fieldLabel}>Opacity</span>
+                    <NumericInput className={styles.fieldInput} label="Shadow opacity" value={Math.round(effect.opacity * 100)} min={0} max={100} onChange={(v) => updateEffect(nodeId, idx, { ...effect, opacity: v / 100 })} />
+                  </div>
+                </div>
+                <div className={styles.colorRow}>
+                  <input className={styles.colorSwatch} type="color" value={effect.color} onChange={(e) => updateEffect(nodeId, idx, { ...effect, color: e.target.value })} />
+                  <input className={styles.colorInput} type="text" value={effect.color} onChange={(e) => updateEffect(nodeId, idx, { ...effect, color: e.target.value })} />
+                </div>
+              </>
+            )}
+            {effect.type === 'blur' && (
+              <div className={styles.row}>
+                <div className={styles.field}>
+                  <span className={styles.fieldLabel}>Radius</span>
+                  <NumericInput className={styles.fieldInput} label="Blur radius" value={effect.radius} min={0} precision={1} onChange={(v) => updateEffect(nodeId, idx, { ...effect, radius: v })} />
+                </div>
+              </div>
+            )}
           </div>
         ))}
         <div className={styles.row}>

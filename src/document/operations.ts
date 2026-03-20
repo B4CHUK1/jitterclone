@@ -318,10 +318,25 @@ export function reparentNode(
 }
 
 export function reorderRootNodes(doc: Document, orderedIds: string[]): Document {
-  return { ...doc, rootNodeIds: orderedIds };
+  // Update the order field on each node to match the new rootNodeIds order
+  const updatedNodes = { ...doc.nodes };
+  for (let i = 0; i < orderedIds.length; i++) {
+    const id = orderedIds[i]!;
+    const node = updatedNodes[id];
+    if (node && node.order !== i) {
+      updatedNodes[id] = { ...node, order: i };
+    }
+  }
+  return { ...doc, rootNodeIds: orderedIds, nodes: updatedNodes };
 }
 
 export function getChildren(doc: Document, parentId: string | null): SceneNode[] {
+  if (parentId === null) {
+    // For root nodes, use rootNodeIds order (authoritative for z-index)
+    return doc.rootNodeIds
+      .map((id) => doc.nodes[id])
+      .filter((n): n is SceneNode => n != null);
+  }
   return Object.values(doc.nodes)
     .filter((n) => n.parentId === parentId)
     .sort((a, b) => a.order - b.order);

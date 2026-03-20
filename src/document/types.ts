@@ -5,7 +5,7 @@
 
 import type { Transform } from '@/engine/transform';
 
-export type NodeType = 'rectangle' | 'ellipse' | 'polygon' | 'star' | 'line' | 'group';
+export type NodeType = 'rectangle' | 'ellipse' | 'polygon' | 'star' | 'line' | 'group' | 'path';
 
 export interface Fill {
   readonly color: string;
@@ -68,6 +68,11 @@ export type BlendMode =
 
 // ── Shape-specific params ──
 
+export interface PathPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
 export interface PolygonParams {
   readonly sides: number; // 3-12
 }
@@ -100,6 +105,8 @@ export interface SceneNode {
   /** Shape-specific parameters */
   readonly polygon?: PolygonParams;
   readonly star?: StarParams;
+  /** Free-draw path points (for 'path' type) */
+  readonly pathData?: PathPoint[];
   /** Clip start time in seconds (global timeline). Layer is inactive before this. */
   readonly startTime: number;
   /** Clip end time in seconds (global timeline). Layer is inactive after this. */
