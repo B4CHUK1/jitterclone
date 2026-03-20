@@ -99,7 +99,7 @@ export function NumericInput({
         e.preventDefault();
         const num = parseFloat(draft);
         if (!isNaN(num)) {
-          const delta = e.shiftKey ? step * 10 : step;
+          const delta = e.shiftKey ? step * 0.1 : e.altKey ? step * 10 : step;
           const newVal = num + delta;
           const clamped = max !== undefined ? Math.min(max, newVal) : newVal;
           setDraft(clamped.toString());
@@ -109,7 +109,7 @@ export function NumericInput({
         e.preventDefault();
         const num = parseFloat(draft);
         if (!isNaN(num)) {
-          const delta = e.shiftKey ? step * 10 : step;
+          const delta = e.shiftKey ? step * 0.1 : e.altKey ? step * 10 : step;
           const newVal = num - delta;
           const clamped = min !== undefined ? Math.max(min, newVal) : newVal;
           setDraft(clamped.toString());

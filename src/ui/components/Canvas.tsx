@@ -485,8 +485,12 @@ export function Canvas() {
         if (dragStartBoundsRef.current && firstUpdate && dragStateRef.current.startTransforms.size > 0) {
           const firstStart = dragStateRef.current.startTransforms.values().next().value;
           if (firstStart) {
-            const proposedDx = firstUpdate.x - firstStart.x;
-            const proposedDy = firstUpdate.y - firstStart.y;
+            let proposedDx = firstUpdate.x - firstStart.x;
+            let proposedDy = firstUpdate.y - firstStart.y;
+            if (e.shiftKey) {
+              if (Math.abs(proposedDx) >= Math.abs(proposedDy)) proposedDy = 0;
+              else proposedDx = 0;
+            }
             const movingBounds = offsetBounds(dragStartBoundsRef.current, proposedDx, proposedDy);
             const snap = resolveBoundsSnapping(
               movingBounds,
@@ -495,8 +499,10 @@ export function Canvas() {
               threshold,
             );
             for (const [id, pos] of updates) {
-              setAnimatableValue(id, 'x', pos.x + snap.dx, currentTime, autoKeyframe);
-              setAnimatableValue(id, 'y', pos.y + snap.dy, currentTime, autoKeyframe);
+              const x = e.shiftKey && Math.abs(proposedDx) < Math.abs(proposedDy) ? dragStateRef.current.startTransforms.get(id)?.x ?? pos.x : pos.x;
+              const y = e.shiftKey && Math.abs(proposedDx) >= Math.abs(proposedDy) ? dragStateRef.current.startTransforms.get(id)?.y ?? pos.y : pos.y;
+              setAnimatableValue(id, 'x', x + snap.dx, currentTime, autoKeyframe);
+              setAnimatableValue(id, 'y', y + snap.dy, currentTime, autoKeyframe);
             }
             setSnapGuides(snap.guides);
             tick();

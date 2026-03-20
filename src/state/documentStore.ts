@@ -42,12 +42,18 @@ interface DocumentState {
   ) => void;
   setKeyframe: (nodeId: string, property: AnimatableProperty, time: number, value: number) => void;
   removeKeyframe: (nodeId: string, property: AnimatableProperty, time: number) => void;
+  moveKeyframe: (
+    nodeId: string,
+    property: AnimatableProperty,
+    fromTime: number,
+    toTime: number,
+  ) => void;
   setAnimatableValue: (
     nodeId: string,
     property: AnimatableProperty,
     value: number,
     time: number,
-    autoKeyframe: boolean,
+    _autoKeyframe: boolean,
   ) => void;
   togglePropertyStopwatch: (nodeId: string, property: AnimatableProperty, time: number) => void;
   addKeyframeAtCurrentTime: (nodeId: string, property: AnimatableProperty, time: number) => void;
@@ -106,7 +112,19 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       document: removeNodeKeyframe(get().document, nodeId, property, time),
     });
   },
-  setAnimatableValue: (nodeId, property, value, time, autoKeyframe) => {
+  moveKeyframe: (nodeId, property, fromTime, toTime) => {
+    const doc = get().document;
+    const node = doc.nodes[nodeId];
+    if (!node) return;
+    const keyframe = node.animation.properties[property].keyframes.find(
+      (key) => Math.abs(key.time - fromTime) < 1e-6,
+    );
+    if (!keyframe) return;
+    let nextDoc = removeNodeKeyframe(doc, nodeId, property, fromTime);
+    nextDoc = setNodeKeyframe(nextDoc, nodeId, property, { time: toTime, value: keyframe.value });
+    set({ document: nextDoc });
+  },
+  setAnimatableValue: (nodeId, property, value, time, _autoKeyframe) => {
     const doc = get().document;
     const node = doc.nodes[nodeId];
     if (!node) return;
@@ -120,7 +138,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       },
     };
 
-    const shouldKey = propertyState.animated || autoKeyframe;
+    const shouldKey = propertyState.animated;
     if (shouldKey) {
       if (!propertyState.animated) {
         const baseValue = getEvaluatedAnimatableValue(node, property, time);

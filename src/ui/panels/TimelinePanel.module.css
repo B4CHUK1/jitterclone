@@ -130,6 +130,17 @@
   border-radius: 4px;
   background: linear-gradient(90deg, #2e6cff, #4e85ff);
   border: 1px solid color-mix(in srgb, #9fb5ff 45%, black);
+  cursor: grab;
+  display: flex;
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+.layerTrimHandle {
+  width: 6px;
+  height: 100%;
+  background: color-mix(in srgb, white 25%, transparent);
+  cursor: ew-resize;
 }
 
 .propertyLabelCell {
