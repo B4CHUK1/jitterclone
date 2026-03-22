@@ -34,7 +34,7 @@ export function getNodeBlurFilterConfig(radius: number, strokeWidth: number): Bl
   return {
     strength: radius,
     quality: Math.min(8, Math.max(4, Math.ceil(radius / 4))),
-    padding: Math.ceil(radius * 3 + strokeWidth),
+    padding: Math.ceil(radius * 4 + strokeWidth),
     repeatEdgePixels: false,
   };
 }
@@ -57,6 +57,7 @@ export class PixiRenderer {
   private worldContainer: Container;
   private docBackground: Graphics;
   private nodeDisplays: Map<string, NodeDisplayObjects> = new Map();
+  private blurFilters: Map<string, BlurFilter> = new Map();
   private _ready = false;
 
   constructor() {
@@ -158,6 +159,7 @@ export class PixiRenderer {
         this.worldContainer.removeChild(display.container);
         display.container.destroy({ children: true });
         this.nodeDisplays.delete(id);
+        this.blurFilters.delete(id);
       }
     }
   }
@@ -235,27 +237,29 @@ export class PixiRenderer {
     // Applied to the main Graphics (not the container) so it blurs only the shape
     // geometry, not the bounding box. The blur follows the actual shape silhouette
     // because PixiJS rasterizes the Graphics first, then applies the filter to those pixels.
-    // Using generous padding to prevent clipping at the edges.
+    // Padding is set explicitly as a property (not via constructor) for PixiJS v8 compatibility.
+    // Filters are cached per node to avoid recreating them every frame.
     const blurEffect = effects.find((e): e is Extract<Effect, { type: 'blur' }> => e.type === 'blur');
     if (blurEffect && blurEffect.radius > 0) {
       const radius = blurEffect.radius;
       const strokeWidth = node.style?.stroke?.width ?? 0;
-      // Build the blur from the node alpha only and keep the filter surface
-      // tightly padded to the kernel so no rectangular filter backing appears.
       const config = getNodeBlurFilterConfig(radius, strokeWidth);
-      const blurFilter = new BlurFilter({
-        strength: config.strength,
-        quality: config.quality,
-        padding: config.padding,
-      });
+      let blurFilter = this.blurFilters.get(node.id);
+      if (!blurFilter || blurFilter.strength !== config.strength || blurFilter.quality !== config.quality) {
+        blurFilter = new BlurFilter({ strength: config.strength, quality: config.quality });
+        blurFilter.padding = config.padding;
+        this.blurFilters.set(node.id, blurFilter);
+      }
       display.main.filters = [blurFilter];
-      display.main.filterArea = undefined;
       // Container must not also have a blur — only main gets it
       display.container.filters = [];
     } else {
       display.main.filters = [];
-      display.main.filterArea = undefined;
       display.container.filters = [];
+      // Clean up cached filter if no longer needed
+      if (this.blurFilters.has(node.id)) {
+        this.blurFilters.delete(node.id);
+      }
     }
   }
 
@@ -398,6 +402,7 @@ export class PixiRenderer {
   destroy(): void {
     this.nodeDisplays.forEach((display) => display.container.destroy({ children: true }));
     this.nodeDisplays.clear();
+    this.blurFilters.clear();
     this.app.destroy(true);
     this._ready = false;
   }

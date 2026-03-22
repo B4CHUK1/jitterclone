@@ -138,10 +138,9 @@ export function normalizePenPath(points: PenPoint[], closed: boolean): {
   pathData: PathPoint[];
   pathClosed: boolean;
 } {
-  // Keep normalization anchored to placed points (preview reference frame).
-  // Bézier handles stay relative and can extend outside this box without
-  // introducing a transform origin shift at finalize/close time.
-  const { minX, minY, maxX, maxY } = computePenAnchorBounds(points);
+  // Use full bezier path bounds so the selection box covers the entire visual
+  // extent of the curve, including bulge from cubic handles.
+  const { minX, minY, maxX, maxY } = computePenPathBounds(points, closed);
   const width = Math.max(1, maxX - minX);
   const height = Math.max(1, maxY - minY);
 
@@ -156,8 +155,8 @@ export function normalizePenPath(points: PenPoint[], closed: boolean): {
 
   return {
     transform: {
-      x: minX + width / 2,
-      y: minY + height / 2,
+      x: minX,
+      y: minY,
       width,
       height,
     },
