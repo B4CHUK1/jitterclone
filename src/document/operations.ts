@@ -335,8 +335,10 @@ export function reorderRootNodes(doc: Document, orderedIds: string[]): Document 
 
 export function getChildren(doc: Document, parentId: string | null): SceneNode[] {
   if (parentId === null) {
-    // For root nodes, use rootNodeIds order (authoritative for z-index)
-    return doc.rootNodeIds
+    // rootNodeIds[0] = top of timeline = highest z-index (rendered last / on top).
+    // Reverse so the scene graph renders index 0 last (front-most).
+    return [...doc.rootNodeIds]
+      .reverse()
       .map((id) => doc.nodes[id])
       .filter((n): n is SceneNode => n != null);
   }

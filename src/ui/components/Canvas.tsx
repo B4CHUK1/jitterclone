@@ -43,7 +43,7 @@ import { ROTATE_CURSOR } from '@/ui/cursors';
 import styles from './Canvas.module.css';
 import { normalizePenPath, computePenPathBounds, type PenPoint } from './penPathUtils';
 import type { PathPoint } from '@/document/types';
-import { PathEditOverlay, hitTestPathEdit } from '@/ui/overlays/PathEditOverlay';
+import { PathEditOverlay, hitTestPathEdit, pathPointToWorld } from '@/ui/overlays/PathEditOverlay';
 
 // ── Drag threshold to distinguish click from drag ──
 const DRAG_THRESHOLD = 3; // pixels
@@ -59,7 +59,8 @@ type InteractionPhase =
   | 'rotating'
   | 'marquee'
   | 'panning'
-  | 'path-editing-dragging'; // dragging an anchor or handle in path edit mode
+  | 'path-editing-dragging'  // dragging an anchor or handle in path edit mode
+  | 'path-marquee';          // box-select anchors in path edit mode
 
 export function Canvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -115,6 +116,17 @@ export function Canvas() {
   } | null>(null);
   const [pathEditActiveAnchor, setPathEditActiveAnchor] = useState(-1);
   const [pathEditActiveHandle, setPathEditActiveHandle] = useState<{ index: number; type: 'in' | 'out' } | null>(null);
+  // Multi-anchor selection state
+  const [selectedAnchorIndices, setSelectedAnchorIndices] = useState<Set<number>>(new Set());
+  const pathEditMultiDragRef = useRef<{
+    startPositions: Map<number, { x: number; y: number }>;
+    startNx: number;
+    startNy: number;
+  } | null>(null);
+  const pathMarqueeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [pathMarqueeScreenRect, setPathMarqueeScreenRect] = useState<{
+    x: number; y: number; width: number; height: number;
+  } | null>(null);
 
   const doc = useDocumentStore((s) => s.document);
   const currentTime = useTimelineStore((s) => s.currentTime);
@@ -218,29 +230,24 @@ export function Canvas() {
       let scaleY = 1;
       let shiftY = 0;
 
-      // If bounds extend before 0, shift origin and expand width
-      if (bounds.minX < 0) {
-        newX = node.transform.x + bounds.minX * currentWidth;
-        newWidth = currentWidth * (1 - bounds.minX);
-        // All pathData points need to be rescaled: newPoint = (oldPoint - minX) / (1 - minX)
-        shiftX = -bounds.minX;
-        scaleX = 1 - bounds.minX;
-      } else if (bounds.maxX > 1) {
-        // If bounds extend past 1, expand width to the right
-        newWidth = currentWidth * bounds.maxX;
-        // All pathData points need to be rescaled: newPoint = oldPoint / maxX
-        scaleX = bounds.maxX;
+      // Handle X axis: expand to contain the full [minX, maxX] range within [0, 1]
+      if (bounds.minX < 0 || bounds.maxX > 1) {
+        const newMinX = Math.min(0, bounds.minX);
+        const newMaxX = Math.max(1, bounds.maxX);
+        newX = node.transform.x + newMinX * currentWidth;
+        newWidth = currentWidth * (newMaxX - newMinX);
+        shiftX = -newMinX;
+        scaleX = newMaxX - newMinX;
       }
 
-      // Same for height
-      if (bounds.minY < 0) {
-        newY = node.transform.y + bounds.minY * currentHeight;
-        newHeight = currentHeight * (1 - bounds.minY);
-        shiftY = -bounds.minY;
-        scaleY = 1 - bounds.minY;
-      } else if (bounds.maxY > 1) {
-        newHeight = currentHeight * bounds.maxY;
-        scaleY = bounds.maxY;
+      // Handle Y axis
+      if (bounds.minY < 0 || bounds.maxY > 1) {
+        const newMinY = Math.min(0, bounds.minY);
+        const newMaxY = Math.max(1, bounds.maxY);
+        newY = node.transform.y + newMinY * currentHeight;
+        newHeight = currentHeight * (newMaxY - newMinY);
+        shiftY = -newMinY;
+        scaleY = newMaxY - newMinY;
       }
 
       // Only update if bounds changed
@@ -435,6 +442,7 @@ export function Canvas() {
           setEditingNode(null);
           setPathEditActiveAnchor(-1);
           setPathEditActiveHandle(null);
+          setSelectedAnchorIndices(new Set());
           pathEditDragRef.current = null;
           return;
         }
@@ -550,24 +558,65 @@ export function Canvas() {
             pointerIdRef.current = e.pointerId;
             containerRef.current?.setPointerCapture(e.pointerId);
             if (target.type === 'anchor') {
+              // Determine new anchor selection
+              let newSelected: Set<number>;
+              if (e.shiftKey) {
+                newSelected = new Set(selectedAnchorIndices);
+                if (newSelected.has(target.index)) newSelected.delete(target.index);
+                else newSelected.add(target.index);
+              } else if (selectedAnchorIndices.has(target.index) && selectedAnchorIndices.size > 1) {
+                newSelected = selectedAnchorIndices; // keep multi-selection for drag
+              } else {
+                newSelected = new Set([target.index]);
+              }
+              setSelectedAnchorIndices(newSelected);
               setPathEditActiveAnchor(target.index);
               setPathEditActiveHandle(null);
               setInteractionCursor('move');
+              // Set up multi-drag if multiple anchors selected
+              if (newSelected.size > 1 && newSelected.has(target.index)) {
+                const wm = renderNode.worldMatrix;
+                const worldPos = screenToWorld(screen);
+                const det = wm.a * wm.d - wm.b * wm.c;
+                const startNx = det
+                  ? (wm.d * (worldPos.x - wm.tx) - wm.c * (worldPos.y - wm.ty)) / det / editingNode.transform.width
+                  : 0;
+                const startNy = det
+                  ? (wm.a * (worldPos.y - wm.ty) - wm.b * (worldPos.x - wm.tx)) / det / editingNode.transform.height
+                  : 0;
+                const startPositions = new Map<number, { x: number; y: number }>();
+                for (const idx of newSelected) {
+                  const p = editingNode.pathData![idx];
+                  if (p) startPositions.set(idx, { x: p.x, y: p.y });
+                }
+                pathEditMultiDragRef.current = { startPositions, startNx, startNy };
+              } else {
+                pathEditMultiDragRef.current = null;
+              }
             } else {
+              setSelectedAnchorIndices(new Set());
               setPathEditActiveAnchor(-1);
               setPathEditActiveHandle({ index: target.index, type: target.handleType });
               setInteractionCursor('crosshair');
+              pathEditMultiDragRef.current = null;
             }
             phaseRef.current = 'path-editing-dragging';
             tick();
             return;
           } else {
-            // Clicked outside → exit editing mode
-            setEditingNode(null);
-            setPathEditActiveAnchor(-1);
-            setPathEditActiveHandle(null);
-            pathEditDragRef.current = null;
-            // Fall through to normal selection logic
+            // No anchor/handle hit → start marquee selection within path edit mode
+            e.preventDefault();
+            const worldPos = screenToWorld(screen);
+            pathMarqueeStartRef.current = worldPos;
+            if (!e.shiftKey) {
+              setSelectedAnchorIndices(new Set());
+            }
+            setPathMarqueeScreenRect({ x: screen.x, y: screen.y, width: 0, height: 0 });
+            pointerIdRef.current = e.pointerId;
+            containerRef.current?.setPointerCapture(e.pointerId);
+            phaseRef.current = 'path-marquee';
+            tick();
+            return;
           }
         }
       }
@@ -709,7 +758,7 @@ export function Canvas() {
 
       tick();
     },
-    [activeTool, clientToScreen, screenToWorld, getScene, deselectAll, tick, selectedIds, worldToScreen, startHandleInteraction, finalizePenPath, editingNodeId, evaluatedDoc.nodes, setEditingNode, convertToPath],
+    [activeTool, clientToScreen, screenToWorld, getScene, deselectAll, tick, selectedIds, worldToScreen, startHandleInteraction, finalizePenPath, editingNodeId, evaluatedDoc.nodes, setEditingNode, convertToPath, selectedAnchorIndices],
   );
 
   // ── POINTER MOVE ──
@@ -737,8 +786,19 @@ export function Canvas() {
         const pt = pathData[drag.index]!;
 
         if (drag.type === 'anchor') {
-          // Spread existing point (preserves handles), override position only
-          pathData[drag.index] = { ...pt, x: nx, y: ny };
+          const multiDrag = pathEditMultiDragRef.current;
+          if (multiDrag && selectedAnchorIndices.size > 1 && selectedAnchorIndices.has(drag.index)) {
+            // Move all selected anchors by the same delta
+            const dnx = nx - multiDrag.startNx;
+            const dny = ny - multiDrag.startNy;
+            for (const [idx, startPos] of multiDrag.startPositions) {
+              const p = pathData[idx];
+              if (p) pathData[idx] = { ...p, x: startPos.x + dnx, y: startPos.y + dny };
+            }
+          } else {
+            // Single anchor move (preserves handles)
+            pathData[drag.index] = { ...pt, x: nx, y: ny };
+          }
         } else {
           const handleOffsetX = nx - pt.x;
           const handleOffsetY = ny - pt.y;
@@ -751,6 +811,43 @@ export function Canvas() {
 
         updatePathData(editingNodeId, pathData, editingNode.pathClosed ?? false);
         renormalizePathBounds(editingNodeId, pathData);
+        tick();
+        return;
+      }
+
+      // Path edit marquee: box-select anchors
+      if (phaseRef.current === 'path-marquee' && editingNodeId && pathMarqueeStartRef.current) {
+        const screen = clientToScreen(e.clientX, e.clientY);
+        const world = screenToWorld(screen);
+        const startWorld = pathMarqueeStartRef.current;
+        const startScreen = worldToScreen(startWorld);
+
+        setPathMarqueeScreenRect({
+          x: Math.min(screen.x, startScreen.x),
+          y: Math.min(screen.y, startScreen.y),
+          width: Math.abs(screen.x - startScreen.x),
+          height: Math.abs(screen.y - startScreen.y),
+        });
+
+        const rectMinX = Math.min(world.x, startWorld.x);
+        const rectMaxX = Math.max(world.x, startWorld.x);
+        const rectMinY = Math.min(world.y, startWorld.y);
+        const rectMaxY = Math.max(world.y, startWorld.y);
+
+        const editingNode = evaluatedDoc.nodes[editingNodeId];
+        const scene = getScene();
+        const renderNode = findRenderNode(scene, editingNodeId);
+        if (editingNode?.pathData && renderNode) {
+          const newSelected = new Set<number>();
+          editingNode.pathData.forEach((ptItem, i) => {
+            const worldPt = pathPointToWorld(ptItem.x, ptItem.y, editingNode, renderNode.worldMatrix);
+            if (worldPt.x >= rectMinX && worldPt.x <= rectMaxX &&
+                worldPt.y >= rectMinY && worldPt.y <= rectMaxY) {
+              newSelected.add(i);
+            }
+          });
+          setSelectedAnchorIndices(newSelected);
+        }
         tick();
         return;
       }
@@ -980,6 +1077,8 @@ export function Canvas() {
       evaluatedDoc.nodes,
       updatePathData,
       renormalizePathBounds,
+      selectedAnchorIndices,
+      worldToScreen,
     ],
   );
 
@@ -989,10 +1088,22 @@ export function Canvas() {
       // Path editing drag complete
       if (phaseRef.current === 'path-editing-dragging') {
         pathEditDragRef.current = null;
+        pathEditMultiDragRef.current = null;
         setPathEditActiveAnchor(-1);
         setPathEditActiveHandle(null);
         phaseRef.current = 'idle';
         setInteractionCursor(null);
+        try { containerRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+        pointerIdRef.current = null;
+        tick();
+        return;
+      }
+
+      // Path edit marquee complete
+      if (phaseRef.current === 'path-marquee') {
+        phaseRef.current = 'idle';
+        setPathMarqueeScreenRect(null);
+        pathMarqueeStartRef.current = null;
         try { containerRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
         pointerIdRef.current = null;
         tick();
@@ -1257,6 +1368,8 @@ export function Canvas() {
           worldToScreen={worldToScreen}
           activeAnchorIndex={pathEditActiveAnchor}
           activeHandle={pathEditActiveHandle}
+          selectedAnchorIndices={selectedAnchorIndices}
+          marqueeScreen={pathMarqueeScreenRect}
         />
       )}
     </div>
