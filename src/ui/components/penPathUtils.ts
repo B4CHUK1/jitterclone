@@ -77,22 +77,6 @@ function cubicSegmentBounds(
   return bounds;
 }
 
-function computePenAnchorBounds(points: PenPoint[]): Bounds {
-  if (points.length === 0) {
-    return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
-  }
-  const bounds: Bounds = {
-    minX: Infinity,
-    minY: Infinity,
-    maxX: -Infinity,
-    maxY: -Infinity,
-  };
-  for (const point of points) {
-    expandBounds(bounds, point.x, point.y);
-  }
-  return bounds;
-}
-
 export function computePenPathBounds(points: PenPoint[], closed: boolean): Bounds {
   if (points.length === 0) {
     return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
