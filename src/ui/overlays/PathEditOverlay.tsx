@@ -29,6 +29,10 @@ interface Props {
   activeAnchorIndex?: number;
   /** Handle currently being dragged */
   activeHandle?: { index: number; type: 'in' | 'out' } | null;
+  /** Anchors selected via shift-click or marquee */
+  selectedAnchorIndices?: Set<number>;
+  /** Marquee rect for path-edit box selection (screen coords) */
+  marqueeScreen?: { x: number; y: number; width: number; height: number } | null;
 }
 
 /** Convert a normalized path point to world coordinates using the node transform and worldMatrix */
@@ -115,6 +119,8 @@ export function PathEditOverlay({
   worldToScreen,
   activeAnchorIndex = -1,
   activeHandle = null,
+  selectedAnchorIndices,
+  marqueeScreen = null,
 }: Props) {
   const pathData = node.pathData;
   if (!pathData || pathData.length === 0) return null;
@@ -198,6 +204,7 @@ export function PathEditOverlay({
       {/* Anchor squares */}
       {anchorScreenPts.map((s, i) => {
         const isActive = activeAnchorIndex === i;
+        const isSelected = selectedAnchorIndices?.has(i) ?? false;
         const size = isActive ? 10 : 8;
         return (
           <rect
@@ -206,12 +213,26 @@ export function PathEditOverlay({
             y={s.y - size / 2}
             width={size}
             height={size}
-            fill={isActive ? '#4dabf7' : '#fff'}
-            stroke={isActive ? '#228be6' : '#4dabf7'}
+            fill={isActive ? '#4dabf7' : isSelected ? '#228be6' : '#fff'}
+            stroke={isActive ? '#228be6' : isSelected ? '#1971c2' : '#4dabf7'}
             strokeWidth="1.5"
           />
         );
       })}
+
+      {/* Marquee selection rect */}
+      {marqueeScreen && (
+        <rect
+          x={marqueeScreen.x}
+          y={marqueeScreen.y}
+          width={marqueeScreen.width}
+          height={marqueeScreen.height}
+          fill="rgba(74, 144, 226, 0.1)"
+          stroke="#4a90e2"
+          strokeWidth="1"
+          strokeDasharray="4 2"
+        />
+      )}
     </svg>
   );
 }
