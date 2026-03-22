@@ -42,6 +42,7 @@ import { defaultTransform } from '@/engine/transform/transform';
 import { ROTATE_CURSOR } from '@/ui/cursors';
 import styles from './Canvas.module.css';
 import { normalizePenPath, computePenPathBounds, type PenPoint } from './penPathUtils';
+import type { PathPoint } from '@/document/types';
 import { PathEditOverlay, hitTestPathEdit } from '@/ui/overlays/PathEditOverlay';
 
 // ── Drag threshold to distinguish click from drag ──
@@ -188,7 +189,7 @@ export function Canvas() {
 
   /** When pathData changes during editing, recompute bounds and update transform width/height */
   const renormalizePathBounds = useCallback(
-    (nodeId: string, pathData: typeof import('@/document/types').PathPoint[]) => {
+    (nodeId: string, pathData: PathPoint[]) => {
       const node = evaluatedDoc.nodes[nodeId];
       if (!node || node.type !== 'path' || !pathData.length) return;
 
