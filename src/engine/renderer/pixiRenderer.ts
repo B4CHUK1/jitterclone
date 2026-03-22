@@ -3,7 +3,7 @@
  * Completely decoupled from React.
  */
 
-import { Application, Container, Graphics, BlurFilter, Rectangle } from 'pixi.js';
+import { Application, Container, Graphics, BlurFilter } from 'pixi.js';
 
 interface BlurFilterConfig {
   strength: number;
@@ -34,18 +34,9 @@ export function getNodeBlurFilterConfig(radius: number, strokeWidth: number): Bl
   return {
     strength: radius,
     quality: Math.min(8, Math.max(4, Math.ceil(radius / 4))),
-    padding: Math.ceil(radius * 2 + strokeWidth),
+    padding: Math.ceil(radius * 3 + strokeWidth),
     repeatEdgePixels: false,
   };
-}
-
-export function getBlurFilterArea(bounds: { x: number; y: number; width: number; height: number }, padding: number): Rectangle {
-  return new Rectangle(
-    bounds.x - padding,
-    bounds.y - padding,
-    bounds.width + padding * 2,
-    bounds.height + padding * 2,
-  );
 }
 
 export interface RendererOptions {
@@ -257,10 +248,8 @@ export class PixiRenderer {
         quality: config.quality,
         padding: config.padding,
       });
-      (blurFilter as BlurFilter & { repeatEdgePixels?: boolean }).repeatEdgePixels = config.repeatEdgePixels;
       display.main.filters = [blurFilter];
-      const worldBounds = display.main.getBounds();
-      display.main.filterArea = getBlurFilterArea(worldBounds, config.padding);
+      display.main.filterArea = undefined;
       // Container must not also have a blur — only main gets it
       display.container.filters = [];
     } else {

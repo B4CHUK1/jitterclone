@@ -17,6 +17,7 @@ import type {
   Effect,
   NodeType,
   NodeStyle,
+  PathPoint,
   SceneNode,
 } from '@/document/types';
 import { createDocument } from '@/document/types';
@@ -33,6 +34,8 @@ import {
   setNodePropertyAnimation,
   updateNodeTiming,
   reorderRootNodes,
+  updateNodePathData,
+  convertNodeToPath,
 } from '@/document/operations';
 import type { Transform } from '@/engine/transform';
 import {
@@ -110,6 +113,11 @@ interface DocumentState {
 
   /** Reorder root layer ids */
   reorderLayers: (orderedIds: string[]) => void;
+
+  /** Update path data for a path node (no undo — used during live editing) */
+  updatePathData: (nodeId: string, pathData: PathPoint[], pathClosed: boolean) => void;
+  /** Convert a geometric shape to a path node (with undo) */
+  convertToPath: (nodeId: string) => void;
 
   /** Undo/Redo */
   undo: () => void;
@@ -407,6 +415,14 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   reorderLayers: (orderedIds) => {
     withUndo(set, get, reorderRootNodes(get().document, orderedIds));
+  },
+
+  updatePathData: (nodeId, pathData, pathClosed) => {
+    set({ document: updateNodePathData(get().document, nodeId, pathData, pathClosed) });
+  },
+
+  convertToPath: (nodeId) => {
+    withUndo(set, get, convertNodeToPath(get().document, nodeId));
   },
 
   undo: () => {

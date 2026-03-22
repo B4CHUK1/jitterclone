@@ -10,6 +10,7 @@ import type {
   Keyframe,
   NodeStyle,
   NodeType,
+  PathPoint,
   SceneNode,
   Composition,
 } from './types';
@@ -342,6 +343,120 @@ export function getChildren(doc: Document, parentId: string | null): SceneNode[]
   return Object.values(doc.nodes)
     .filter((n) => n.parentId === parentId)
     .sort((a, b) => a.order - b.order);
+}
+
+/**
+ * Update pathData and pathClosed on a path node.
+ */
+export function updateNodePathData(
+  doc: Document,
+  nodeId: string,
+  pathData: PathPoint[],
+  pathClosed: boolean,
+): Document {
+  const node = doc.nodes[nodeId];
+  if (!node) return doc;
+  return {
+    ...doc,
+    nodes: {
+      ...doc.nodes,
+      [nodeId]: { ...node, pathData, pathClosed },
+    },
+  };
+}
+
+/** Cubic bezier circle approximation constant */
+const KAPPA = 0.5522847498;
+
+/**
+ * Convert a geometric shape node to a 'path' type with equivalent pathData.
+ * Rectangle, ellipse, polygon, star, line → path.
+ * Path nodes are returned unchanged.
+ */
+export function convertNodeToPath(doc: Document, nodeId: string): Document {
+  const node = doc.nodes[nodeId];
+  if (!node || node.type === 'path' || node.type === 'group') return doc;
+
+  let pathData: PathPoint[];
+  let pathClosed: boolean;
+
+  switch (node.type) {
+    case 'rectangle': {
+      // 4 corners: TL, TR, BR, BL
+      pathData = [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 1, y: 1 },
+        { x: 0, y: 1 },
+      ];
+      pathClosed = true;
+      break;
+    }
+    case 'ellipse': {
+      // 4 cubic bezier points approximating a circle (center 0.5,0.5, radius 0.5)
+      const k = KAPPA * 0.5;
+      pathData = [
+        // Right (0°)
+        { x: 1, y: 0.5, handleInX: 0, handleInY: -k, handleOutX: 0, handleOutY: k },
+        // Bottom (90°)
+        { x: 0.5, y: 1, handleInX: k, handleInY: 0, handleOutX: -k, handleOutY: 0 },
+        // Left (180°)
+        { x: 0, y: 0.5, handleInX: 0, handleInY: k, handleOutX: 0, handleOutY: -k },
+        // Top (270°)
+        { x: 0.5, y: 0, handleInX: -k, handleInY: 0, handleOutX: k, handleOutY: 0 },
+      ];
+      pathClosed = true;
+      break;
+    }
+    case 'polygon': {
+      const sides = node.polygon?.sides ?? 6;
+      pathData = [];
+      for (let i = 0; i < sides; i++) {
+        const angle = (i / sides) * Math.PI * 2 - Math.PI / 2;
+        pathData.push({
+          x: 0.5 + Math.cos(angle) * 0.5,
+          y: 0.5 + Math.sin(angle) * 0.5,
+        });
+      }
+      pathClosed = true;
+      break;
+    }
+    case 'star': {
+      const pts = node.star?.points ?? 5;
+      const innerRatio = node.star?.innerRadius ?? 0.4;
+      const outerR = 0.5;
+      const innerR = outerR * innerRatio;
+      pathData = [];
+      for (let i = 0; i < pts * 2; i++) {
+        const angle = (i / (pts * 2)) * Math.PI * 2 - Math.PI / 2;
+        const r = i % 2 === 0 ? outerR : innerR;
+        pathData.push({
+          x: 0.5 + Math.cos(angle) * r,
+          y: 0.5 + Math.sin(angle) * r,
+        });
+      }
+      pathClosed = true;
+      break;
+    }
+    case 'line': {
+      pathData = [
+        { x: 0, y: 0.5 },
+        { x: 1, y: 0.5 },
+      ];
+      pathClosed = false;
+      break;
+    }
+    default:
+      return doc;
+  }
+
+  return {
+    ...doc,
+    nodes: {
+      ...doc.nodes,
+      [nodeId]: { ...node, type: 'path', pathData, pathClosed },
+    },
+  };
 }
 
 export function getAncestors(doc: Document, nodeId: string): string[] {

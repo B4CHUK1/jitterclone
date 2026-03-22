@@ -42,6 +42,7 @@ import { defaultTransform } from '@/engine/transform/transform';
 import { ROTATE_CURSOR } from '@/ui/cursors';
 import styles from './Canvas.module.css';
 import { normalizePenPath, type PenPoint } from './penPathUtils';
+import { PathEditOverlay, hitTestPathEdit } from '@/ui/overlays/PathEditOverlay';
 
 // ── Drag threshold to distinguish click from drag ──
 const DRAG_THRESHOLD = 3; // pixels
@@ -50,13 +51,14 @@ const SNAP_THRESHOLD_SCREEN_PX = 8;
 // ── Interaction state machine ──
 type InteractionPhase =
   | 'idle'
-  | 'pending-drag'     // pointerdown on element, waiting for threshold
-  | 'pending-marquee'  // pointerdown on empty, waiting for threshold
+  | 'pending-drag'           // pointerdown on element, waiting for threshold
+  | 'pending-marquee'        // pointerdown on empty, waiting for threshold
   | 'dragging'
   | 'resizing'
   | 'rotating'
   | 'marquee'
-  | 'panning';
+  | 'panning'
+  | 'path-editing-dragging'; // dragging an anchor or handle in path edit mode
 
 export function Canvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -96,11 +98,22 @@ export function Canvas() {
   const penActiveRef = useRef(false);
   const penDraggingHandleRef = useRef(false);
   const penClosedRef = useRef(false);
+  const penCleanupRef = useRef<(() => void) | null>(null);
   const [penPreview, setPenPreview] = useState<{
     points: PenPoint[];
     cursor: { x: number; y: number } | null;
     draggingHandle: boolean;
   } | null>(null);
+  const [penNearClose, setPenNearClose] = useState(false);
+
+  // ── Path editing state ──
+  const pathEditDragRef = useRef<{
+    type: 'anchor' | 'handle';
+    index: number;
+    handleType?: 'in' | 'out';
+  } | null>(null);
+  const [pathEditActiveAnchor, setPathEditActiveAnchor] = useState(-1);
+  const [pathEditActiveHandle, setPathEditActiveHandle] = useState<{ index: number; type: 'in' | 'out' } | null>(null);
 
   const doc = useDocumentStore((s) => s.document);
   const currentTime = useTimelineStore((s) => s.currentTime);
@@ -108,6 +121,8 @@ export function Canvas() {
   const updateTransform = useDocumentStore((s) => s.updateTransform);
   const setAnimatableValue = useDocumentStore((s) => s.setAnimatableValue);
   const addNode = useDocumentStore((s) => s.addNode);
+  const updatePathData = useDocumentStore((s) => s.updatePathData);
+  const convertToPath = useDocumentStore((s) => s.convertToPath);
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const select = useEditorStore((s) => s.select);
   const selectMultiple = useEditorStore((s) => s.selectMultiple);
@@ -115,6 +130,8 @@ export function Canvas() {
   const deselectAll = useEditorStore((s) => s.deselectAll);
   const activeTool = useEditorStore((s) => s.activeTool);
   const setTool = useEditorStore((s) => s.setTool);
+  const editingNodeId = useEditorStore((s) => s.editingNodeId);
+  const setEditingNode = useEditorStore((s) => s.setEditingNode);
   const autoKeyframe = useTimelineStore((s) => s.autoKeyframe);
 
   const zoom = useViewportStore((s) => s.zoom);
@@ -329,18 +346,33 @@ export function Canvas() {
   // ── Pen tool keyboard: Enter/Escape = finalize open path ──
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && penActiveRef.current) {
-        e.preventDefault();
-        finalizePenPath(false);
+      if (e.key === 'Escape') {
+        if (penActiveRef.current) {
+          e.preventDefault();
+          penCleanupRef.current?.();
+          penCleanupRef.current = null;
+          finalizePenPath(false);
+          return;
+        }
+        if (editingNodeId) {
+          e.preventDefault();
+          setEditingNode(null);
+          setPathEditActiveAnchor(-1);
+          setPathEditActiveHandle(null);
+          pathEditDragRef.current = null;
+          return;
+        }
       }
       if (e.key === 'Enter' && penActiveRef.current) {
         e.preventDefault();
+        penCleanupRef.current?.();
+        penCleanupRef.current = null;
         finalizePenPath(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [finalizePenPath]);
+  }, [finalizePenPath, editingNodeId, setEditingNode]);
 
   // ── Cancel pen path when switching tools ──
   useEffect(() => {
@@ -424,6 +456,46 @@ export function Canvas() {
   // ── POINTER DOWN on canvas ──
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
+      // Path editing mode: hit-test anchors and handles
+      if (e.button === 0 && editingNodeId && activeTool === 'select') {
+        const screen = clientToScreen(e.clientX, e.clientY);
+        const editingNode = evaluatedDoc.nodes[editingNodeId];
+        const scene = getScene();
+        const renderNode = findRenderNode(scene, editingNodeId);
+        if (editingNode?.pathData && renderNode) {
+          const target = hitTestPathEdit(editingNode, renderNode.worldMatrix, worldToScreen, screen);
+          if (target) {
+            e.preventDefault();
+            pathEditDragRef.current = {
+              type: target.type,
+              index: target.index,
+              handleType: target.type === 'handle' ? target.handleType : undefined,
+            };
+            pointerIdRef.current = e.pointerId;
+            containerRef.current?.setPointerCapture(e.pointerId);
+            if (target.type === 'anchor') {
+              setPathEditActiveAnchor(target.index);
+              setPathEditActiveHandle(null);
+              setInteractionCursor('move');
+            } else {
+              setPathEditActiveAnchor(-1);
+              setPathEditActiveHandle({ index: target.index, type: target.handleType });
+              setInteractionCursor('crosshair');
+            }
+            phaseRef.current = 'path-editing-dragging';
+            tick();
+            return;
+          } else {
+            // Clicked outside → exit editing mode
+            setEditingNode(null);
+            setPathEditActiveAnchor(-1);
+            setPathEditActiveHandle(null);
+            pathEditDragRef.current = null;
+            // Fall through to normal selection logic
+          }
+        }
+      }
+
       // Pen tool: click-to-place anchor points, drag-to-create Bézier handles
       if (e.button === 0 && activeTool === 'pen') {
         e.preventDefault();
@@ -447,6 +519,10 @@ export function Canvas() {
         }
 
         penActiveRef.current = true;
+        // Capture pointer so preview continues outside the div
+        containerRef.current?.setPointerCapture(e.pointerId);
+        pointerIdRef.current = e.pointerId;
+
         // Add new point with no handles (corner point)
         const newPoint = { x: world.x, y: world.y, handleInX: 0, handleInY: 0, handleOutX: 0, handleOutY: 0 };
         penPointsRef.current = [...penPointsRef.current, newPoint];
@@ -455,6 +531,10 @@ export function Canvas() {
         // Track drag for handle creation
         const startClient = { x: e.clientX, y: e.clientY };
         const pointIndex = penPointsRef.current.length - 1;
+        const capturedPointerId = e.pointerId;
+
+        // Clean up any previous window listeners
+        penCleanupRef.current?.();
 
         const onMove = (ev: globalThis.PointerEvent) => {
           const moveScreen = clientToScreen(ev.clientX, ev.clientY);
@@ -478,14 +558,20 @@ export function Canvas() {
         };
 
         const onUp = () => {
-          window.removeEventListener('pointermove', onMove);
-          window.removeEventListener('pointerup', onUp);
+          penCleanupRef.current?.();
+          penCleanupRef.current = null;
           penDraggingHandleRef.current = false;
+          try { containerRef.current?.releasePointerCapture(capturedPointerId); } catch { /* ignore */ }
+          pointerIdRef.current = null;
           setPenPreview({ points: [...penPointsRef.current], cursor: world, draggingHandle: false });
         };
 
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
+        penCleanupRef.current = () => {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+        };
 
         setPenPreview({ points: [...penPointsRef.current], cursor: world, draggingHandle: false });
         setInteractionCursor('crosshair');
@@ -547,18 +633,66 @@ export function Canvas() {
 
       tick();
     },
-    [activeTool, clientToScreen, screenToWorld, getScene, deselectAll, tick, selectedIds, worldToScreen, startHandleInteraction, finalizePenPath],
+    [activeTool, clientToScreen, screenToWorld, getScene, deselectAll, tick, selectedIds, worldToScreen, startHandleInteraction, finalizePenPath, editingNodeId, evaluatedDoc.nodes, setEditingNode, convertToPath],
   );
 
   // ── POINTER MOVE ──
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
+      // Path editing drag: move anchor or handle
+      if (phaseRef.current === 'path-editing-dragging' && editingNodeId && pathEditDragRef.current) {
+        const screen = clientToScreen(e.clientX, e.clientY);
+        const world = screenToWorld(screen);
+        const editingNode = evaluatedDoc.nodes[editingNodeId];
+        const scene = getScene();
+        const renderNode = findRenderNode(scene, editingNodeId);
+        if (!editingNode?.pathData || !renderNode) return;
+
+        const wm = renderNode.worldMatrix;
+        const det = wm.a * wm.d - wm.b * wm.c;
+        if (Math.abs(det) < 1e-10) return;
+        const localX = (wm.d * (world.x - wm.tx) - wm.c * (world.y - wm.ty)) / det;
+        const localY = (wm.a * (world.y - wm.ty) - wm.b * (world.x - wm.tx)) / det;
+        const nx = localX / editingNode.transform.width;
+        const ny = localY / editingNode.transform.height;
+
+        const drag = pathEditDragRef.current;
+        const pathData = [...editingNode.pathData];
+        const pt = pathData[drag.index]!;
+
+        if (drag.type === 'anchor') {
+          // Spread existing point (preserves handles), override position only
+          pathData[drag.index] = { ...pt, x: nx, y: ny };
+        } else {
+          const handleOffsetX = nx - pt.x;
+          const handleOffsetY = ny - pt.y;
+          if (drag.handleType === 'out') {
+            pathData[drag.index] = { ...pt, handleOutX: handleOffsetX, handleOutY: handleOffsetY };
+          } else {
+            pathData[drag.index] = { ...pt, handleInX: handleOffsetX, handleInY: handleOffsetY };
+          }
+        }
+
+        updatePathData(editingNodeId, pathData, editingNode.pathClosed ?? false);
+        tick();
+        return;
+      }
+
       // Pen tool: update cursor preview position (but not during handle drag — that's handled separately)
       if (activeTool === 'pen') {
         if (penDraggingHandleRef.current) return;
         const screen = clientToScreen(e.clientX, e.clientY);
         const world = screenToWorld(screen);
         if (penActiveRef.current) {
+          // Check if cursor is near the first anchor (to show close indicator)
+          if (penPointsRef.current.length >= 2) {
+            const firstPt = penPointsRef.current[0]!;
+            const firstScreen = worldToScreen(firstPt);
+            const dist = Math.hypot(screen.x - firstScreen.x, screen.y - firstScreen.y);
+            setPenNearClose(dist < 14);
+          } else {
+            setPenNearClose(false);
+          }
           setPenPreview((prev) =>
             prev
               ? { ...prev, cursor: world }
@@ -765,12 +899,28 @@ export function Canvas() {
       tick,
       currentTime,
       autoKeyframe,
+      editingNodeId,
+      evaluatedDoc.nodes,
+      updatePathData,
     ],
   );
 
   // ── POINTER UP ──
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
+      // Path editing drag complete
+      if (phaseRef.current === 'path-editing-dragging') {
+        pathEditDragRef.current = null;
+        setPathEditActiveAnchor(-1);
+        setPathEditActiveHandle(null);
+        phaseRef.current = 'idle';
+        setInteractionCursor(null);
+        try { containerRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+        pointerIdRef.current = null;
+        tick();
+        return;
+      }
+
       // Pen tool is click-based — nothing to do on pointer up
       if (activeTool === 'pen') {
         return;
@@ -795,7 +945,7 @@ export function Canvas() {
 
       resetInteraction(e.pointerId);
     },
-    [activeTool, select, toggleSelect, resetInteraction],
+    [activeTool, select, toggleSelect, resetInteraction, tick],
   );
 
   // ── Pointer cancel / window blur — safety cleanup ──
@@ -820,6 +970,39 @@ export function Canvas() {
     };
   }, [resetInteraction]);
 
+  // ── DOUBLE CLICK: pen finalize or enter path editing mode ──
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      // Pen tool: double-click anywhere to finalize as open path
+      if (activeTool === 'pen' && penActiveRef.current) {
+        e.preventDefault();
+        penCleanupRef.current?.();
+        penCleanupRef.current = null;
+        finalizePenPath(false);
+        return;
+      }
+
+      // Select tool: double-click selected shape to enter path editing
+      if (activeTool === 'select') {
+        const screen = clientToScreen(e.clientX, e.clientY);
+        const world = screenToWorld(screen);
+        const scene = getScene();
+        const hit = hitTestPoint(scene, world);
+        if (hit && selectedIds.has(hit.node.id)) {
+          const nodeId = hit.node.id;
+          const node = evaluatedDoc.nodes[nodeId];
+          if (!node || node.type === 'group') return;
+          if (node.type !== 'path') {
+            convertToPath(nodeId);
+          }
+          setEditingNode(nodeId);
+          tick();
+        }
+      }
+    },
+    [activeTool, clientToScreen, screenToWorld, getScene, selectedIds, evaluatedDoc.nodes, convertToPath, setEditingNode, finalizePenPath, tick],
+  );
+
   // ── Handle pointer down on selection handles (from overlay) ──
   const handleHandlePointerDown = startHandleInteraction;
 
@@ -834,6 +1017,11 @@ export function Canvas() {
     return nodes;
   })();
 
+  // ── Path edit node lookup ──
+  const pathEditScene = editingNodeId ? getScene() : null;
+  const pathEditRenderNode = pathEditScene && editingNodeId ? findRenderNode(pathEditScene, editingNodeId) : null;
+  const pathEditNode = editingNodeId ? evaluatedDoc.nodes[editingNodeId] : null;
+
   // ── Compute effective cursor ──
   const effectiveCursor = interactionCursor ?? hoverCursor;
 
@@ -845,13 +1033,15 @@ export function Canvas() {
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onDoubleClick={handleDoubleClick}
     >
       <canvas
         ref={canvasRef}
         className={styles.canvas}
       />
+      {/* Hide resize/rotate handles for the node being edited */}
       <SelectionOverlay
-        selectedNodes={selectedRenderNodes}
+        selectedNodes={selectedRenderNodes.filter((rn) => rn.node.id !== editingNodeId)}
         worldToScreen={worldToScreen}
         onHandlePointerDown={handleHandlePointerDown}
         marqueeScreen={marqueeScreenRect}
@@ -962,21 +1152,34 @@ export function Canvas() {
           {/* Anchor point squares */}
           {penPreview.points.map((p, i) => {
             const s = worldToScreen(p);
-            const isFirst = i === 0 && penPreview.points.length >= 3;
+            const isFirst = i === 0 && penPreview.points.length >= 2;
+            const canClose = isFirst && penNearClose;
+            const size = canClose ? 10 : 8;
             return (
               <rect
                 key={`anchor-${i}`}
-                x={s.x - 4}
-                y={s.y - 4}
-                width={8}
-                height={8}
-                fill={isFirst ? '#69db7c' : '#ffffff'}
-                stroke={isFirst ? '#2f9e44' : '#4dabf7'}
+                x={s.x - size / 2}
+                y={s.y - size / 2}
+                width={size}
+                height={size}
+                fill={canClose ? '#69db7c' : '#ffffff'}
+                stroke={canClose ? '#2f9e44' : '#4dabf7'}
                 strokeWidth="1.5"
               />
             );
           })}
         </svg>
+      )}
+
+      {/* ── Path editing overlay ── */}
+      {editingNodeId && pathEditNode?.pathData && pathEditRenderNode && (
+        <PathEditOverlay
+          node={pathEditNode}
+          worldMatrix={pathEditRenderNode.worldMatrix}
+          worldToScreen={worldToScreen}
+          activeAnchorIndex={pathEditActiveAnchor}
+          activeHandle={pathEditActiveHandle}
+        />
       )}
     </div>
   );
