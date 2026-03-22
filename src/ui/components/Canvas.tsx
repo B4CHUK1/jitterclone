@@ -41,7 +41,7 @@ import { RotateTooltipOverlay } from '@/ui/overlays/RotateTooltipOverlay';
 import { defaultTransform } from '@/engine/transform/transform';
 import { ROTATE_CURSOR } from '@/ui/cursors';
 import styles from './Canvas.module.css';
-import { normalizePenPath, type PenPoint } from './penPathUtils';
+import { normalizePenPath, computePenPathBounds, type PenPoint } from './penPathUtils';
 import { PathEditOverlay, hitTestPathEdit } from '@/ui/overlays/PathEditOverlay';
 
 // ── Drag threshold to distinguish click from drag ──
@@ -184,6 +184,60 @@ export function Canvas() {
       tick();
     },
     [tick],
+  );
+
+  /** When pathData changes during editing, recompute bounds and update transform width/height */
+  const renormalizePathBounds = useCallback(
+    (nodeId: string, pathData: typeof import('@/document/types').PathPoint[]) => {
+      const node = evaluatedDoc.nodes[nodeId];
+      if (!node || node.type !== 'path' || !pathData.length) return;
+
+      // Compute bounds of all pathData points (treating them as [0,1] relative to current transform)
+      const bounds = computePenPathBounds(
+        pathData.map((pt) => ({
+          x: pt.x,
+          y: pt.y,
+          handleInX: pt.handleInX ?? 0,
+          handleInY: pt.handleInY ?? 0,
+          handleOutX: pt.handleOutX ?? 0,
+          handleOutY: pt.handleOutY ?? 0,
+        })),
+        node.pathClosed ?? false,
+      );
+
+      // Check if bounds exceed [0, 1] and expand transform if needed
+      const currentWidth = node.transform.width;
+      const currentHeight = node.transform.height;
+      let newWidth = currentWidth;
+      let newHeight = currentHeight;
+      let newX = node.transform.x;
+      let newY = node.transform.y;
+
+      // If bounds extend before 0, shift origin left and expand width
+      if (bounds.minX < 0) {
+        newX = node.transform.x + bounds.minX * currentWidth;
+        newWidth = currentWidth * (1 - bounds.minX);
+      }
+      // If bounds extend past 1, expand width to the right
+      if (bounds.maxX > 1) {
+        newWidth = currentWidth * bounds.maxX;
+      }
+
+      // Same for height
+      if (bounds.minY < 0) {
+        newY = node.transform.y + bounds.minY * currentHeight;
+        newHeight = currentHeight * (1 - bounds.minY);
+      }
+      if (bounds.maxY > 1) {
+        newHeight = currentHeight * bounds.maxY;
+      }
+
+      // Only update if bounds changed
+      if (newX !== node.transform.x || newY !== node.transform.y || newWidth !== currentWidth || newHeight !== currentHeight) {
+        updateTransform(nodeId, { x: newX, y: newY, width: newWidth, height: newHeight });
+      }
+    },
+    [evaluatedDoc.nodes, updateTransform],
   );
 
   // ── Init renderer ──
@@ -674,6 +728,7 @@ export function Canvas() {
         }
 
         updatePathData(editingNodeId, pathData, editingNode.pathClosed ?? false);
+        renormalizePathBounds(editingNodeId, pathData);
         tick();
         return;
       }
@@ -902,6 +957,7 @@ export function Canvas() {
       editingNodeId,
       evaluatedDoc.nodes,
       updatePathData,
+      renormalizePathBounds,
     ],
   );
 
