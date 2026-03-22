@@ -36,6 +36,9 @@ interface EditorState {
   interactionMode: InteractionMode;
   activeResizeHandle: ResizeHandle | null;
 
+  // Path editing mode (double-click vector editing, Figma-style)
+  editingNodeId: string | null;
+
   // Actions
   select: (id: string) => void;
   selectMultiple: (ids: string[]) => void;
@@ -44,6 +47,7 @@ interface EditorState {
   setTool: (tool: EditorTool) => void;
   setInteractionMode: (mode: InteractionMode) => void;
   setActiveResizeHandle: (handle: ResizeHandle | null) => void;
+  setEditingNode: (id: string | null) => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -51,6 +55,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   activeTool: 'select',
   interactionMode: 'idle',
   activeResizeHandle: null,
+  editingNodeId: null,
 
   select: (id) => set({ selectedIds: new Set([id]) }),
   selectMultiple: (ids) => set({ selectedIds: new Set(ids) }),
@@ -68,4 +73,5 @@ export const useEditorStore = create<EditorState>((set) => ({
   setTool: (tool) => set({ activeTool: tool }),
   setInteractionMode: (mode) => set({ interactionMode: mode }),
   setActiveResizeHandle: (handle) => set({ activeResizeHandle: handle }),
+  setEditingNode: (id) => set({ editingNodeId: id }),
 }));
