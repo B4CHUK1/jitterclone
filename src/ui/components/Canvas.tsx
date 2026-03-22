@@ -213,32 +213,53 @@ export function Canvas() {
       let newHeight = currentHeight;
       let newX = node.transform.x;
       let newY = node.transform.y;
+      let scaleX = 1;
+      let shiftX = 0;
+      let scaleY = 1;
+      let shiftY = 0;
 
-      // If bounds extend before 0, shift origin left and expand width
+      // If bounds extend before 0, shift origin and expand width
       if (bounds.minX < 0) {
         newX = node.transform.x + bounds.minX * currentWidth;
         newWidth = currentWidth * (1 - bounds.minX);
-      }
-      // If bounds extend past 1, expand width to the right
-      if (bounds.maxX > 1) {
+        // All pathData points need to be rescaled: newPoint = (oldPoint - minX) / (1 - minX)
+        shiftX = -bounds.minX;
+        scaleX = 1 - bounds.minX;
+      } else if (bounds.maxX > 1) {
+        // If bounds extend past 1, expand width to the right
         newWidth = currentWidth * bounds.maxX;
+        // All pathData points need to be rescaled: newPoint = oldPoint / maxX
+        scaleX = bounds.maxX;
       }
 
       // Same for height
       if (bounds.minY < 0) {
         newY = node.transform.y + bounds.minY * currentHeight;
         newHeight = currentHeight * (1 - bounds.minY);
-      }
-      if (bounds.maxY > 1) {
+        shiftY = -bounds.minY;
+        scaleY = 1 - bounds.minY;
+      } else if (bounds.maxY > 1) {
         newHeight = currentHeight * bounds.maxY;
+        scaleY = bounds.maxY;
       }
 
       // Only update if bounds changed
       if (newX !== node.transform.x || newY !== node.transform.y || newWidth !== currentWidth || newHeight !== currentHeight) {
+        // Rescale all pathData points to fit new transform
+        const rescaledPathData = pathData.map((pt) => ({
+          ...pt,
+          x: (pt.x + shiftX) / scaleX,
+          y: (pt.y + shiftY) / scaleY,
+          handleInX: (pt.handleInX ?? 0) / scaleX,
+          handleInY: (pt.handleInY ?? 0) / scaleY,
+          handleOutX: (pt.handleOutX ?? 0) / scaleX,
+          handleOutY: (pt.handleOutY ?? 0) / scaleY,
+        }));
+        updatePathData(nodeId, rescaledPathData, node.pathClosed ?? false);
         updateTransform(nodeId, { x: newX, y: newY, width: newWidth, height: newHeight });
       }
     },
-    [evaluatedDoc.nodes, updateTransform],
+    [evaluatedDoc.nodes, updateTransform, updatePathData],
   );
 
   // ── Init renderer ──
