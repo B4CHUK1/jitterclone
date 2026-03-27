@@ -309,7 +309,7 @@
   cursor: pointer;
   appearance: none;
   transform: translate(-50%, -50%) rotate(45deg);
-  transition: border-color 0.08s, box-shadow 0.08s, transform 0.08s;
+  transition: border-color 0.08s, box-shadow 0.08s;
   z-index: 1;
 }
 
@@ -442,4 +442,68 @@
   z-index: 10;
   border-radius: 1px;
   box-shadow: 0 0 4px var(--color-selection);
+}
+
+/* ── Transform group header ── */
+.groupHeaderCell {
+  padding-left: 28px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.groupHeaderLabel {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.groupHeaderTimeCell {
+  background: color-mix(in srgb, var(--color-bg-tertiary) 60%, black);
+}
+
+/* ── Add property row ── */
+.addPropertyCell {
+  padding-left: 28px;
+}
+
+.addPropertySelect {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.1s, color 0.1s;
+}
+
+.addPropertySelect:hover {
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.addPropertySelect:focus {
+  outline: none;
+  border-color: var(--color-selection);
+}
+
+.addPropertyTimeCell {
+  background: color-mix(in srgb, var(--color-bg-tertiary) 60%, black);
+}
+
+/* ── Row fade-in animation ── */
+.row {
+  animation: fadeInRow 0.15s ease-out;
+}
+
+@keyframes fadeInRow {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

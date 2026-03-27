@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight as ChevronRightIcon,
   Diamond,
+  Plus,
 } from 'lucide-react';
 import {
   hasKeyframeAtTime,
@@ -71,6 +72,7 @@ export function TimelinePanel() {
   const addKeyframeAtCurrentTime = useDocumentStore((s) => s.addKeyframeAtCurrentTime);
 
   const [expandedLayers, setExpandedLayers] = useState<Record<string, boolean>>({});
+  const [revealedProperties, setRevealedProperties] = useState<Record<string, Set<AnimatableProperty>>>({});
   const [draggingPlayhead, setDraggingPlayhead] = useState(false);
   const [clipboardKeys, setClipboardKeys] = useState<{ nodeId: string; property: AnimatableProperty; time: number; value: number }[]>([]);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -115,9 +117,17 @@ export function TimelinePanel() {
 
   const timeScale = useMemo(() => createTimelineTimeScale(duration, timeScaleValue), [duration, timeScaleValue]);
   const layout = useMemo(
-    () => buildTimelineLayout(tracks, expandedLayers, PROPERTIES),
-    [tracks, expandedLayers],
+    () => buildTimelineLayout(tracks, expandedLayers, PROPERTIES, revealedProperties),
+    [tracks, expandedLayers, revealedProperties],
   );
+
+  const revealProperty = useCallback((nodeId: string, property: AnimatableProperty) => {
+    setRevealedProperties((prev) => {
+      const nodeSet = new Set(prev[nodeId] ?? []);
+      nodeSet.add(property);
+      return { ...prev, [nodeId]: nodeSet };
+    });
+  }, []);
 
   const totalWidth = TIMELINE_LABEL_WIDTH + timeScale.contentWidth;
   const playheadX = TIMELINE_LABEL_WIDTH + timeScale.toX(currentTime);
@@ -691,6 +701,57 @@ export function TimelinePanel() {
                       onSnapActive={setActiveSnapTime}
                     />
                   </div>
+                </div>
+              );
+            }
+
+            if (row.kind === 'group-header') {
+              return (
+                <div
+                  key={row.id}
+                  className={styles.row}
+                  style={{ top: `${row.top}px`, height: `${row.height}px` }}
+                >
+                  <div className={`${styles.labelCell} ${styles.groupHeaderCell}`}>
+                    <span className={styles.groupHeaderLabel}>{row.groupLabel}</span>
+                  </div>
+                  <div className={`${styles.timeCell} ${styles.groupHeaderTimeCell}`} />
+                </div>
+              );
+            }
+
+            if (row.kind === 'add-property') {
+              const nodeId = row.node.id;
+              const hiddenProps = PROPERTIES.filter((p) => {
+                const animProp = row.node.animation.properties[p.key];
+                const revealed = revealedProperties[nodeId]?.has(p.key);
+                return animProp.keyframes.length === 0 && !revealed;
+              });
+              return (
+                <div
+                  key={row.id}
+                  className={styles.row}
+                  style={{ top: `${row.top}px`, height: `${row.height}px` }}
+                >
+                  <div className={`${styles.labelCell} ${styles.addPropertyCell}`}>
+                    <select
+                      className={styles.addPropertySelect}
+                      value=""
+                      onChange={(e) => {
+                        const prop = e.target.value as AnimatableProperty;
+                        if (prop) revealProperty(nodeId, prop);
+                        e.target.value = '';
+                      }}
+                    >
+                      <option value="" disabled>
+                        + Add Property
+                      </option>
+                      {hiddenProps.map((p) => (
+                        <option key={p.key} value={p.key}>{p.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={`${styles.timeCell} ${styles.addPropertyTimeCell}`} />
                 </div>
               );
             }
