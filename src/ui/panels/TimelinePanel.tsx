@@ -13,7 +13,6 @@ import {
   ChevronDown,
   ChevronRight as ChevronRightIcon,
   Diamond,
-  Plus,
 } from 'lucide-react';
 import {
   hasKeyframeAtTime,
