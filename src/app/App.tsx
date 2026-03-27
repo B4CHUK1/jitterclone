@@ -75,6 +75,32 @@ export function App() {
             deselectAll();
           }
           break;
+        case ' ':
+          e.preventDefault();
+          if (isPlaying) {
+            useTimelineStore.getState().pause();
+          } else {
+            useTimelineStore.getState().play();
+          }
+          break;
+        case 'arrowleft': {
+          e.preventDefault();
+          const tState = useTimelineStore.getState();
+          const fps = composition.fps || 30;
+          const step = (e.shiftKey ? 10 : 1) / fps;
+          tState.pause();
+          tState.setCurrentTime(Math.max(0, tState.currentTime - step));
+          break;
+        }
+        case 'arrowright': {
+          e.preventDefault();
+          const tState = useTimelineStore.getState();
+          const fps = composition.fps || 30;
+          const step = (e.shiftKey ? 10 : 1) / fps;
+          tState.pause();
+          tState.setCurrentTime(Math.min(composition.duration, tState.currentTime + step));
+          break;
+        }
         case 'delete':
         case 'backspace': {
           // If keyframes are selected in timeline, delete those (not the objects)

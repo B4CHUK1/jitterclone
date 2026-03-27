@@ -643,6 +643,20 @@ export function Canvas() {
           }
         }
 
+        // Click near last anchor: convert to corner point (remove handles)
+        if (penActiveRef.current && penPointsRef.current.length >= 1) {
+          const lastPt = penPointsRef.current[penPointsRef.current.length - 1]!;
+          const lastScreen = worldToScreen(lastPt);
+          const dist = Math.hypot(screen.x - lastScreen.x, screen.y - lastScreen.y);
+          if (dist < 10) {
+            const pts = [...penPointsRef.current];
+            pts[pts.length - 1] = { ...pts[pts.length - 1]!, handleOutX: 0, handleOutY: 0, handleInX: 0, handleInY: 0 };
+            penPointsRef.current = pts;
+            setPenPreview({ points: [...pts], cursor: world, draggingHandle: false });
+            return;
+          }
+        }
+
         penActiveRef.current = true;
         // Capture pointer so preview continues outside the div
         containerRef.current?.setPointerCapture(e.pointerId);
@@ -666,17 +680,27 @@ export function Canvas() {
           const moveWorld = screenToWorld(moveScreen);
           const dx = moveWorld.x - world.x;
           const dy = moveWorld.y - world.y;
-          // If dragged beyond threshold, create symmetric handles
+          // If dragged beyond threshold, create handles
           const dist = Math.sqrt((ev.clientX - startClient.x) ** 2 + (ev.clientY - startClient.y) ** 2);
           if (dist > 3) {
             const pts = [...penPointsRef.current];
-            pts[pointIndex] = {
-              ...pts[pointIndex]!,
-              handleOutX: dx,
-              handleOutY: dy,
-              handleInX: -dx,
-              handleInY: -dy,
-            };
+            if (ev.altKey) {
+              // Alt held: only move outgoing handle (break symmetry)
+              pts[pointIndex] = {
+                ...pts[pointIndex]!,
+                handleOutX: dx,
+                handleOutY: dy,
+              };
+            } else {
+              // Default: symmetric handles
+              pts[pointIndex] = {
+                ...pts[pointIndex]!,
+                handleOutX: dx,
+                handleOutY: dy,
+                handleInX: -dx,
+                handleInY: -dy,
+              };
+            }
             penPointsRef.current = pts;
             setPenPreview({ points: [...pts], cursor: moveWorld, draggingHandle: true });
           }
@@ -1357,6 +1381,18 @@ export function Canvas() {
               />
             );
           })}
+          {/* Cursor position indicator dot */}
+          {penPreview.cursor && !penPreview.draggingHandle && (
+            <circle
+              cx={worldToScreen(penPreview.cursor).x}
+              cy={worldToScreen(penPreview.cursor).y}
+              r={4}
+              fill="none"
+              stroke="#4dabf7"
+              strokeWidth="1.5"
+              opacity="0.8"
+            />
+          )}
         </svg>
       )}
 
